@@ -159,6 +159,28 @@ func foldDisplay(s string) string {
 	return n
 }
 
+// displayIDsMatchByIdentity compares two display spellings by parsed identity
+// tuple. Compact foldDisplay erases the separator-pinned T/T28 boundary
+// (T-28123-HD and T28-123-HD both fold to t28123h), so parseable spellings
+// compare series/number/suffix/marker tuples instead; unparseable spellings
+// fall back to the folded comparison.
+func displayIDsMatchByIdentity(a, b string) bool {
+	aSeries, aNumber, aSuffix, aMarker, aOK := r18ParseRemasterTail(a)
+	bSeries, bNumber, bSuffix, bMarker, bOK := r18ParseRemasterTail(b)
+	if aOK && bOK {
+		foldMarker := func(m string) string {
+			if m == "hd" {
+				return "h"
+			}
+			return m
+		}
+		return aSeries == bSeries &&
+			strings.TrimLeft(aNumber, "0") == strings.TrimLeft(bNumber, "0") &&
+			aSuffix == bSuffix && foldMarker(aMarker) == foldMarker(bMarker)
+	}
+	return foldDisplay(a) == foldDisplay(b)
+}
+
 // cidCarriesMarker reports whether a content id carries the folded marker.
 func cidCarriesMarker(contentID, foldedMarker string) bool {
 	c := r18CompactID(contentID)
@@ -220,23 +242,7 @@ func markerVariationAccept(body []byte, queryID, foldedMarker, series string) bo
 		return true
 	}
 	if data.DVDID != "" {
-		// Compact foldDisplay erases the separator-pinned T/T28 boundary
-		// (T-28123-HD and T28-123-HD both fold to t28123h); compare parsed
-		// identity tuples instead, falling back for unparseable spellings.
-		dSeries, dNumber, dSuffix, dMarker, dOK := r18ParseRemasterTail(data.DVDID)
-		qSeries, qNumber, qSuffix, qMarker, qOK := r18ParseRemasterTail(queryID)
-		if dOK && qOK {
-			fold := func(m string) string {
-				if m == "hd" {
-					return "h"
-				}
-				return m
-			}
-			return dSeries == qSeries &&
-				strings.TrimLeft(dNumber, "0") == strings.TrimLeft(qNumber, "0") &&
-				dSuffix == qSuffix && fold(dMarker) == fold(qMarker)
-		}
-		return foldDisplay(data.DVDID) == foldDisplay(queryID)
+		return displayIDsMatchByIdentity(data.DVDID, queryID)
 	}
 	return true
 }

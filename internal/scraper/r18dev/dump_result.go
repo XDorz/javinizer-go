@@ -338,7 +338,7 @@ func (s *scraper) searchFromDump(ctx context.Context, id string) (*models.Scrape
 		logging.Debugf("R18: dump candidates for %s -> %s (+%d more)", id, candidates[0].ContentID, len(candidates)-1)
 		return nil, candidates
 	}
-	if marker, _ := classifyRemaster(id); marker != "" && !isRawRemasterContentIDQuery(id) && movie.DVDID != "" && foldDisplay(movie.DVDID) != foldDisplay(id) {
+	if marker, _ := classifyRemaster(id); marker != "" && !isRawRemasterContentIDQuery(id) && movie.DVDID != "" && !displayIDsMatchByIdentity(movie.DVDID, id) {
 		return nil, nil
 	}
 	logging.Debugf("R18: dump lookup resolved %s -> full metadata (zero HTTP)", id)
