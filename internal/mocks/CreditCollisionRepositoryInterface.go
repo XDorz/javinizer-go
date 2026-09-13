@@ -7,10 +7,9 @@ package mocks
 import (
 	"context"
 
-	"gorm.io/gorm"
-
 	"github.com/javinizer/javinizer-go/internal/models"
 	mock "github.com/stretchr/testify/mock"
+	"gorm.io/gorm"
 )
 
 // NewMockCreditCollisionRepositoryInterface creates a new instance of MockCreditCollisionRepositoryInterface. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
@@ -38,6 +37,470 @@ type MockCreditCollisionRepositoryInterface_Expecter struct {
 
 func (_m *MockCreditCollisionRepositoryInterface) EXPECT() *MockCreditCollisionRepositoryInterface_Expecter {
 	return &MockCreditCollisionRepositoryInterface_Expecter{mock: &_m.Mock}
+}
+
+// CloseByCredit provides a mock function for the type MockCreditCollisionRepositoryInterface
+func (_mock *MockCreditCollisionRepositoryInterface) CloseByCredit(ctx context.Context, creditID uint, resolution string) error {
+	ret := _mock.Called(ctx, creditID, resolution)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CloseByCredit")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint, string) error); ok {
+		r0 = returnFunc(ctx, creditID, resolution)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockCreditCollisionRepositoryInterface_CloseByCredit_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CloseByCredit'
+type MockCreditCollisionRepositoryInterface_CloseByCredit_Call struct {
+	*mock.Call
+}
+
+// CloseByCredit is a helper method to define mock.On call
+//   - ctx context.Context
+//   - creditID uint
+//   - resolution string
+func (_e *MockCreditCollisionRepositoryInterface_Expecter) CloseByCredit(ctx any, creditID any, resolution any) *MockCreditCollisionRepositoryInterface_CloseByCredit_Call {
+	return &MockCreditCollisionRepositoryInterface_CloseByCredit_Call{Call: _e.mock.On("CloseByCredit", ctx, creditID, resolution)}
+}
+
+func (_c *MockCreditCollisionRepositoryInterface_CloseByCredit_Call) Run(run func(ctx context.Context, creditID uint, resolution string)) *MockCreditCollisionRepositoryInterface_CloseByCredit_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 uint
+		if args[1] != nil {
+			arg1 = args[1].(uint)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCreditCollisionRepositoryInterface_CloseByCredit_Call) Return(err error) *MockCreditCollisionRepositoryInterface_CloseByCredit_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockCreditCollisionRepositoryInterface_CloseByCredit_Call) RunAndReturn(run func(ctx context.Context, creditID uint, resolution string) error) *MockCreditCollisionRepositoryInterface_CloseByCredit_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CloseByCreditTx provides a mock function for the type MockCreditCollisionRepositoryInterface
+func (_mock *MockCreditCollisionRepositoryInterface) CloseByCreditTx(tx *gorm.DB, creditID uint, resolution string) error {
+	ret := _mock.Called(tx, creditID, resolution)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CloseByCreditTx")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(*gorm.DB, uint, string) error); ok {
+		r0 = returnFunc(tx, creditID, resolution)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockCreditCollisionRepositoryInterface_CloseByCreditTx_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CloseByCreditTx'
+type MockCreditCollisionRepositoryInterface_CloseByCreditTx_Call struct {
+	*mock.Call
+}
+
+// CloseByCreditTx is a helper method to define mock.On call
+//   - tx *gorm.DB
+//   - creditID uint
+//   - resolution string
+func (_e *MockCreditCollisionRepositoryInterface_Expecter) CloseByCreditTx(tx any, creditID any, resolution any) *MockCreditCollisionRepositoryInterface_CloseByCreditTx_Call {
+	return &MockCreditCollisionRepositoryInterface_CloseByCreditTx_Call{Call: _e.mock.On("CloseByCreditTx", tx, creditID, resolution)}
+}
+
+func (_c *MockCreditCollisionRepositoryInterface_CloseByCreditTx_Call) Run(run func(tx *gorm.DB, creditID uint, resolution string)) *MockCreditCollisionRepositoryInterface_CloseByCreditTx_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 *gorm.DB
+		if args[0] != nil {
+			arg0 = args[0].(*gorm.DB)
+		}
+		var arg1 uint
+		if args[1] != nil {
+			arg1 = args[1].(uint)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCreditCollisionRepositoryInterface_CloseByCreditTx_Call) Return(err error) *MockCreditCollisionRepositoryInterface_CloseByCreditTx_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockCreditCollisionRepositoryInterface_CloseByCreditTx_Call) RunAndReturn(run func(tx *gorm.DB, creditID uint, resolution string) error) *MockCreditCollisionRepositoryInterface_CloseByCreditTx_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CountOpenByMovieBatch provides a mock function for the type MockCreditCollisionRepositoryInterface
+func (_mock *MockCreditCollisionRepositoryInterface) CountOpenByMovieBatch(ctx context.Context, movieIDs []string) (map[string]int64, error) {
+	ret := _mock.Called(ctx, movieIDs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CountOpenByMovieBatch")
+	}
+
+	var r0 map[string]int64
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, []string) (map[string]int64, error)); ok {
+		return returnFunc(ctx, movieIDs)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, []string) map[string]int64); ok {
+		r0 = returnFunc(ctx, movieIDs)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]int64)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, []string) error); ok {
+		r1 = returnFunc(ctx, movieIDs)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockCreditCollisionRepositoryInterface_CountOpenByMovieBatch_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CountOpenByMovieBatch'
+type MockCreditCollisionRepositoryInterface_CountOpenByMovieBatch_Call struct {
+	*mock.Call
+}
+
+// CountOpenByMovieBatch is a helper method to define mock.On call
+//   - ctx context.Context
+//   - movieIDs []string
+func (_e *MockCreditCollisionRepositoryInterface_Expecter) CountOpenByMovieBatch(ctx any, movieIDs any) *MockCreditCollisionRepositoryInterface_CountOpenByMovieBatch_Call {
+	return &MockCreditCollisionRepositoryInterface_CountOpenByMovieBatch_Call{Call: _e.mock.On("CountOpenByMovieBatch", ctx, movieIDs)}
+}
+
+func (_c *MockCreditCollisionRepositoryInterface_CountOpenByMovieBatch_Call) Run(run func(ctx context.Context, movieIDs []string)) *MockCreditCollisionRepositoryInterface_CountOpenByMovieBatch_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 []string
+		if args[1] != nil {
+			arg1 = args[1].([]string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCreditCollisionRepositoryInterface_CountOpenByMovieBatch_Call) Return(stringToInt64 map[string]int64, err error) *MockCreditCollisionRepositoryInterface_CountOpenByMovieBatch_Call {
+	_c.Call.Return(stringToInt64, err)
+	return _c
+}
+
+func (_c *MockCreditCollisionRepositoryInterface_CountOpenByMovieBatch_Call) RunAndReturn(run func(ctx context.Context, movieIDs []string) (map[string]int64, error)) *MockCreditCollisionRepositoryInterface_CountOpenByMovieBatch_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// FindByID provides a mock function for the type MockCreditCollisionRepositoryInterface
+func (_mock *MockCreditCollisionRepositoryInterface) FindByID(ctx context.Context, id uint) (*models.CreditCollision, error) {
+	ret := _mock.Called(ctx, id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FindByID")
+	}
+
+	var r0 *models.CreditCollision
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint) (*models.CreditCollision, error)); ok {
+		return returnFunc(ctx, id)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint) *models.CreditCollision); ok {
+		r0 = returnFunc(ctx, id)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*models.CreditCollision)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, uint) error); ok {
+		r1 = returnFunc(ctx, id)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockCreditCollisionRepositoryInterface_FindByID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FindByID'
+type MockCreditCollisionRepositoryInterface_FindByID_Call struct {
+	*mock.Call
+}
+
+// FindByID is a helper method to define mock.On call
+//   - ctx context.Context
+//   - id uint
+func (_e *MockCreditCollisionRepositoryInterface_Expecter) FindByID(ctx any, id any) *MockCreditCollisionRepositoryInterface_FindByID_Call {
+	return &MockCreditCollisionRepositoryInterface_FindByID_Call{Call: _e.mock.On("FindByID", ctx, id)}
+}
+
+func (_c *MockCreditCollisionRepositoryInterface_FindByID_Call) Run(run func(ctx context.Context, id uint)) *MockCreditCollisionRepositoryInterface_FindByID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 uint
+		if args[1] != nil {
+			arg1 = args[1].(uint)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCreditCollisionRepositoryInterface_FindByID_Call) Return(creditCollision *models.CreditCollision, err error) *MockCreditCollisionRepositoryInterface_FindByID_Call {
+	_c.Call.Return(creditCollision, err)
+	return _c
+}
+
+func (_c *MockCreditCollisionRepositoryInterface_FindByID_Call) RunAndReturn(run func(ctx context.Context, id uint) (*models.CreditCollision, error)) *MockCreditCollisionRepositoryInterface_FindByID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// HasOpenForMovie provides a mock function for the type MockCreditCollisionRepositoryInterface
+func (_mock *MockCreditCollisionRepositoryInterface) HasOpenForMovie(ctx context.Context, movieContentID string) (bool, error) {
+	ret := _mock.Called(ctx, movieContentID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HasOpenForMovie")
+	}
+
+	var r0 bool
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (bool, error)); ok {
+		return returnFunc(ctx, movieContentID)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) bool); ok {
+		r0 = returnFunc(ctx, movieContentID)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, movieContentID)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockCreditCollisionRepositoryInterface_HasOpenForMovie_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HasOpenForMovie'
+type MockCreditCollisionRepositoryInterface_HasOpenForMovie_Call struct {
+	*mock.Call
+}
+
+// HasOpenForMovie is a helper method to define mock.On call
+//   - ctx context.Context
+//   - movieContentID string
+func (_e *MockCreditCollisionRepositoryInterface_Expecter) HasOpenForMovie(ctx any, movieContentID any) *MockCreditCollisionRepositoryInterface_HasOpenForMovie_Call {
+	return &MockCreditCollisionRepositoryInterface_HasOpenForMovie_Call{Call: _e.mock.On("HasOpenForMovie", ctx, movieContentID)}
+}
+
+func (_c *MockCreditCollisionRepositoryInterface_HasOpenForMovie_Call) Run(run func(ctx context.Context, movieContentID string)) *MockCreditCollisionRepositoryInterface_HasOpenForMovie_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCreditCollisionRepositoryInterface_HasOpenForMovie_Call) Return(b bool, err error) *MockCreditCollisionRepositoryInterface_HasOpenForMovie_Call {
+	_c.Call.Return(b, err)
+	return _c
+}
+
+func (_c *MockCreditCollisionRepositoryInterface_HasOpenForMovie_Call) RunAndReturn(run func(ctx context.Context, movieContentID string) (bool, error)) *MockCreditCollisionRepositoryInterface_HasOpenForMovie_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListOpenByActress provides a mock function for the type MockCreditCollisionRepositoryInterface
+func (_mock *MockCreditCollisionRepositoryInterface) ListOpenByActress(ctx context.Context, actressID uint) ([]models.CreditCollision, error) {
+	ret := _mock.Called(ctx, actressID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListOpenByActress")
+	}
+
+	var r0 []models.CreditCollision
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint) ([]models.CreditCollision, error)); ok {
+		return returnFunc(ctx, actressID)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint) []models.CreditCollision); ok {
+		r0 = returnFunc(ctx, actressID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.CreditCollision)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, uint) error); ok {
+		r1 = returnFunc(ctx, actressID)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockCreditCollisionRepositoryInterface_ListOpenByActress_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListOpenByActress'
+type MockCreditCollisionRepositoryInterface_ListOpenByActress_Call struct {
+	*mock.Call
+}
+
+// ListOpenByActress is a helper method to define mock.On call
+//   - ctx context.Context
+//   - actressID uint
+func (_e *MockCreditCollisionRepositoryInterface_Expecter) ListOpenByActress(ctx any, actressID any) *MockCreditCollisionRepositoryInterface_ListOpenByActress_Call {
+	return &MockCreditCollisionRepositoryInterface_ListOpenByActress_Call{Call: _e.mock.On("ListOpenByActress", ctx, actressID)}
+}
+
+func (_c *MockCreditCollisionRepositoryInterface_ListOpenByActress_Call) Run(run func(ctx context.Context, actressID uint)) *MockCreditCollisionRepositoryInterface_ListOpenByActress_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 uint
+		if args[1] != nil {
+			arg1 = args[1].(uint)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCreditCollisionRepositoryInterface_ListOpenByActress_Call) Return(creditCollisions []models.CreditCollision, err error) *MockCreditCollisionRepositoryInterface_ListOpenByActress_Call {
+	_c.Call.Return(creditCollisions, err)
+	return _c
+}
+
+func (_c *MockCreditCollisionRepositoryInterface_ListOpenByActress_Call) RunAndReturn(run func(ctx context.Context, actressID uint) ([]models.CreditCollision, error)) *MockCreditCollisionRepositoryInterface_ListOpenByActress_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListOpenByMovie provides a mock function for the type MockCreditCollisionRepositoryInterface
+func (_mock *MockCreditCollisionRepositoryInterface) ListOpenByMovie(ctx context.Context, movieContentID string) ([]models.CreditCollision, error) {
+	ret := _mock.Called(ctx, movieContentID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListOpenByMovie")
+	}
+
+	var r0 []models.CreditCollision
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) ([]models.CreditCollision, error)); ok {
+		return returnFunc(ctx, movieContentID)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) []models.CreditCollision); ok {
+		r0 = returnFunc(ctx, movieContentID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.CreditCollision)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, movieContentID)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockCreditCollisionRepositoryInterface_ListOpenByMovie_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListOpenByMovie'
+type MockCreditCollisionRepositoryInterface_ListOpenByMovie_Call struct {
+	*mock.Call
+}
+
+// ListOpenByMovie is a helper method to define mock.On call
+//   - ctx context.Context
+//   - movieContentID string
+func (_e *MockCreditCollisionRepositoryInterface_Expecter) ListOpenByMovie(ctx any, movieContentID any) *MockCreditCollisionRepositoryInterface_ListOpenByMovie_Call {
+	return &MockCreditCollisionRepositoryInterface_ListOpenByMovie_Call{Call: _e.mock.On("ListOpenByMovie", ctx, movieContentID)}
+}
+
+func (_c *MockCreditCollisionRepositoryInterface_ListOpenByMovie_Call) Run(run func(ctx context.Context, movieContentID string)) *MockCreditCollisionRepositoryInterface_ListOpenByMovie_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCreditCollisionRepositoryInterface_ListOpenByMovie_Call) Return(creditCollisions []models.CreditCollision, err error) *MockCreditCollisionRepositoryInterface_ListOpenByMovie_Call {
+	_c.Call.Return(creditCollisions, err)
+	return _c
+}
+
+func (_c *MockCreditCollisionRepositoryInterface_ListOpenByMovie_Call) RunAndReturn(run func(ctx context.Context, movieContentID string) ([]models.CreditCollision, error)) *MockCreditCollisionRepositoryInterface_ListOpenByMovie_Call {
+	_c.Call.Return(run)
+	return _c
 }
 
 // RecordTx provides a mock function for the type MockCreditCollisionRepositoryInterface
@@ -80,7 +543,10 @@ func (_c *MockCreditCollisionRepositoryInterface_RecordTx_Call) Run(run func(tx 
 		if args[1] != nil {
 			arg1 = args[1].(*models.CreditCollision)
 		}
-		arg2 := args[2].(string)
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
 		run(
 			arg0,
 			arg1,
@@ -90,8 +556,8 @@ func (_c *MockCreditCollisionRepositoryInterface_RecordTx_Call) Run(run func(tx 
 	return _c
 }
 
-func (_c *MockCreditCollisionRepositoryInterface_RecordTx_Call) Return(r0 error) *MockCreditCollisionRepositoryInterface_RecordTx_Call {
-	_c.Call.Return(r0)
+func (_c *MockCreditCollisionRepositoryInterface_RecordTx_Call) Return(err error) *MockCreditCollisionRepositoryInterface_RecordTx_Call {
+	_c.Call.Return(err)
 	return _c
 }
 
@@ -100,41 +566,45 @@ func (_c *MockCreditCollisionRepositoryInterface_RecordTx_Call) RunAndReturn(run
 	return _c
 }
 
-// ListOpenByMovie provides a mock function for the type MockCreditCollisionRepositoryInterface
-func (_mock *MockCreditCollisionRepositoryInterface) ListOpenByMovie(ctx context.Context, movieContentID string) ([]models.CreditCollision, error) {
-	ret := _mock.Called(ctx, movieContentID)
+// Reopen provides a mock function for the type MockCreditCollisionRepositoryInterface
+func (_mock *MockCreditCollisionRepositoryInterface) Reopen(ctx context.Context, collisionID uint) error {
+	ret := _mock.Called(ctx, collisionID)
 
 	if len(ret) == 0 {
-		panic("no return value specified for ListOpenByMovie")
+		panic("no return value specified for Reopen")
 	}
 
-	var r0 []models.CreditCollision
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) ([]models.CreditCollision, error)); ok {
-		r0, r1 = returnFunc(ctx, movieContentID)
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint) error); ok {
+		r0 = returnFunc(ctx, collisionID)
 	} else {
-		r0 = ret.Get(0).([]models.CreditCollision)
-		r1 = ret.Error(1)
+		r0 = ret.Error(0)
 	}
-	return r0, r1
+	return r0
 }
 
-// MockCreditCollisionRepositoryInterface_ListOpenByMovie_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListOpenByMovie'
-type MockCreditCollisionRepositoryInterface_ListOpenByMovie_Call struct {
+// MockCreditCollisionRepositoryInterface_Reopen_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Reopen'
+type MockCreditCollisionRepositoryInterface_Reopen_Call struct {
 	*mock.Call
 }
 
-// ListOpenByMovie is a helper method to define mock.On call
+// Reopen is a helper method to define mock.On call
 //   - ctx context.Context
-//   - movieContentID string
-func (_e *MockCreditCollisionRepositoryInterface_Expecter) ListOpenByMovie(ctx any, movieContentID any) *MockCreditCollisionRepositoryInterface_ListOpenByMovie_Call {
-	return &MockCreditCollisionRepositoryInterface_ListOpenByMovie_Call{Call: _e.mock.On("ListOpenByMovie", ctx, movieContentID)}
+//   - collisionID uint
+func (_e *MockCreditCollisionRepositoryInterface_Expecter) Reopen(ctx any, collisionID any) *MockCreditCollisionRepositoryInterface_Reopen_Call {
+	return &MockCreditCollisionRepositoryInterface_Reopen_Call{Call: _e.mock.On("Reopen", ctx, collisionID)}
 }
 
-func (_c *MockCreditCollisionRepositoryInterface_ListOpenByMovie_Call) Run(run func(ctx context.Context, movieContentID string)) *MockCreditCollisionRepositoryInterface_ListOpenByMovie_Call {
+func (_c *MockCreditCollisionRepositoryInterface_Reopen_Call) Run(run func(ctx context.Context, collisionID uint)) *MockCreditCollisionRepositoryInterface_Reopen_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		arg0 := args[0].(context.Context)
-		arg1 := args[1].(string)
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 uint
+		if args[1] != nil {
+			arg1 = args[1].(uint)
+		}
 		run(
 			arg0,
 			arg1,
@@ -143,118 +613,12 @@ func (_c *MockCreditCollisionRepositoryInterface_ListOpenByMovie_Call) Run(run f
 	return _c
 }
 
-func (_c *MockCreditCollisionRepositoryInterface_ListOpenByMovie_Call) Return(r0 []models.CreditCollision, r1 error) *MockCreditCollisionRepositoryInterface_ListOpenByMovie_Call {
-	_c.Call.Return(r0, r1)
+func (_c *MockCreditCollisionRepositoryInterface_Reopen_Call) Return(err error) *MockCreditCollisionRepositoryInterface_Reopen_Call {
+	_c.Call.Return(err)
 	return _c
 }
 
-func (_c *MockCreditCollisionRepositoryInterface_ListOpenByMovie_Call) RunAndReturn(run func(ctx context.Context, movieContentID string) ([]models.CreditCollision, error)) *MockCreditCollisionRepositoryInterface_ListOpenByMovie_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// HasOpenForMovie provides a mock function for the type MockCreditCollisionRepositoryInterface
-func (_mock *MockCreditCollisionRepositoryInterface) HasOpenForMovie(ctx context.Context, movieContentID string) (bool, error) {
-	ret := _mock.Called(ctx, movieContentID)
-
-	if len(ret) == 0 {
-		panic("no return value specified for HasOpenForMovie")
-	}
-
-	var r0 bool
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (bool, error)); ok {
-		r0, r1 = returnFunc(ctx, movieContentID)
-	} else {
-		r0 = ret.Bool(0)
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockCreditCollisionRepositoryInterface_HasOpenForMovie_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HasOpenForMovie'
-type MockCreditCollisionRepositoryInterface_HasOpenForMovie_Call struct {
-	*mock.Call
-}
-
-// HasOpenForMovie is a helper method to define mock.On call
-//   - ctx context.Context
-//   - movieContentID string
-func (_e *MockCreditCollisionRepositoryInterface_Expecter) HasOpenForMovie(ctx any, movieContentID any) *MockCreditCollisionRepositoryInterface_HasOpenForMovie_Call {
-	return &MockCreditCollisionRepositoryInterface_HasOpenForMovie_Call{Call: _e.mock.On("HasOpenForMovie", ctx, movieContentID)}
-}
-
-func (_c *MockCreditCollisionRepositoryInterface_HasOpenForMovie_Call) Run(run func(ctx context.Context, movieContentID string)) *MockCreditCollisionRepositoryInterface_HasOpenForMovie_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		arg0 := args[0].(context.Context)
-		arg1 := args[1].(string)
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *MockCreditCollisionRepositoryInterface_HasOpenForMovie_Call) Return(r0 bool, r1 error) *MockCreditCollisionRepositoryInterface_HasOpenForMovie_Call {
-	_c.Call.Return(r0, r1)
-	return _c
-}
-
-func (_c *MockCreditCollisionRepositoryInterface_HasOpenForMovie_Call) RunAndReturn(run func(ctx context.Context, movieContentID string) (bool, error)) *MockCreditCollisionRepositoryInterface_HasOpenForMovie_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// ListOpenByActress provides a mock function for the type MockCreditCollisionRepositoryInterface
-func (_mock *MockCreditCollisionRepositoryInterface) ListOpenByActress(ctx context.Context, actressID uint) ([]models.CreditCollision, error) {
-	ret := _mock.Called(ctx, actressID)
-
-	if len(ret) == 0 {
-		panic("no return value specified for ListOpenByActress")
-	}
-
-	var r0 []models.CreditCollision
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, uint) ([]models.CreditCollision, error)); ok {
-		r0, r1 = returnFunc(ctx, actressID)
-	} else {
-		r0 = ret.Get(0).([]models.CreditCollision)
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockCreditCollisionRepositoryInterface_ListOpenByActress_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListOpenByActress'
-type MockCreditCollisionRepositoryInterface_ListOpenByActress_Call struct {
-	*mock.Call
-}
-
-// ListOpenByActress is a helper method to define mock.On call
-//   - ctx context.Context
-//   - actressID uint
-func (_e *MockCreditCollisionRepositoryInterface_Expecter) ListOpenByActress(ctx any, actressID any) *MockCreditCollisionRepositoryInterface_ListOpenByActress_Call {
-	return &MockCreditCollisionRepositoryInterface_ListOpenByActress_Call{Call: _e.mock.On("ListOpenByActress", ctx, actressID)}
-}
-
-func (_c *MockCreditCollisionRepositoryInterface_ListOpenByActress_Call) Run(run func(ctx context.Context, actressID uint)) *MockCreditCollisionRepositoryInterface_ListOpenByActress_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		arg0 := args[0].(context.Context)
-		arg1 := args[1].(uint)
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *MockCreditCollisionRepositoryInterface_ListOpenByActress_Call) Return(r0 []models.CreditCollision, r1 error) *MockCreditCollisionRepositoryInterface_ListOpenByActress_Call {
-	_c.Call.Return(r0, r1)
-	return _c
-}
-
-func (_c *MockCreditCollisionRepositoryInterface_ListOpenByActress_Call) RunAndReturn(run func(ctx context.Context, actressID uint) ([]models.CreditCollision, error)) *MockCreditCollisionRepositoryInterface_ListOpenByActress_Call {
+func (_c *MockCreditCollisionRepositoryInterface_Reopen_Call) RunAndReturn(run func(ctx context.Context, collisionID uint) error) *MockCreditCollisionRepositoryInterface_Reopen_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -291,9 +655,18 @@ func (_e *MockCreditCollisionRepositoryInterface_Expecter) Resolve(ctx any, coll
 
 func (_c *MockCreditCollisionRepositoryInterface_Resolve_Call) Run(run func(ctx context.Context, collisionID uint, resolution string)) *MockCreditCollisionRepositoryInterface_Resolve_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		arg0 := args[0].(context.Context)
-		arg1 := args[1].(uint)
-		arg2 := args[2].(string)
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 uint
+		if args[1] != nil {
+			arg1 = args[1].(uint)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
 		run(
 			arg0,
 			arg1,
@@ -303,63 +676,12 @@ func (_c *MockCreditCollisionRepositoryInterface_Resolve_Call) Run(run func(ctx 
 	return _c
 }
 
-func (_c *MockCreditCollisionRepositoryInterface_Resolve_Call) Return(r0 error) *MockCreditCollisionRepositoryInterface_Resolve_Call {
-	_c.Call.Return(r0)
+func (_c *MockCreditCollisionRepositoryInterface_Resolve_Call) Return(err error) *MockCreditCollisionRepositoryInterface_Resolve_Call {
+	_c.Call.Return(err)
 	return _c
 }
 
 func (_c *MockCreditCollisionRepositoryInterface_Resolve_Call) RunAndReturn(run func(ctx context.Context, collisionID uint, resolution string) error) *MockCreditCollisionRepositoryInterface_Resolve_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// Reopen provides a mock function for the type MockCreditCollisionRepositoryInterface
-func (_mock *MockCreditCollisionRepositoryInterface) Reopen(ctx context.Context, collisionID uint) error {
-	ret := _mock.Called(ctx, collisionID)
-
-	if len(ret) == 0 {
-		panic("no return value specified for Reopen")
-	}
-
-	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, uint) error); ok {
-		r0 = returnFunc(ctx, collisionID)
-	} else {
-		r0 = ret.Error(0)
-	}
-	return r0
-}
-
-// MockCreditCollisionRepositoryInterface_Reopen_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Reopen'
-type MockCreditCollisionRepositoryInterface_Reopen_Call struct {
-	*mock.Call
-}
-
-// Reopen is a helper method to define mock.On call
-//   - ctx context.Context
-//   - collisionID uint
-func (_e *MockCreditCollisionRepositoryInterface_Expecter) Reopen(ctx any, collisionID any) *MockCreditCollisionRepositoryInterface_Reopen_Call {
-	return &MockCreditCollisionRepositoryInterface_Reopen_Call{Call: _e.mock.On("Reopen", ctx, collisionID)}
-}
-
-func (_c *MockCreditCollisionRepositoryInterface_Reopen_Call) Run(run func(ctx context.Context, collisionID uint)) *MockCreditCollisionRepositoryInterface_Reopen_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		arg0 := args[0].(context.Context)
-		arg1 := args[1].(uint)
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *MockCreditCollisionRepositoryInterface_Reopen_Call) Return(r0 error) *MockCreditCollisionRepositoryInterface_Reopen_Call {
-	_c.Call.Return(r0)
-	return _c
-}
-
-func (_c *MockCreditCollisionRepositoryInterface_Reopen_Call) RunAndReturn(run func(ctx context.Context, collisionID uint) error) *MockCreditCollisionRepositoryInterface_Reopen_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -401,9 +723,18 @@ func (_c *MockCreditCollisionRepositoryInterface_TransferTx_Call) Run(run func(t
 		if args[0] != nil {
 			arg0 = args[0].(*gorm.DB)
 		}
-		arg1 := args[1].(uint)
-		arg2 := args[2].(uint)
-		arg3 := args[3].(string)
+		var arg1 uint
+		if args[1] != nil {
+			arg1 = args[1].(uint)
+		}
+		var arg2 uint
+		if args[2] != nil {
+			arg2 = args[2].(uint)
+		}
+		var arg3 string
+		if args[3] != nil {
+			arg3 = args[3].(string)
+		}
 		run(
 			arg0,
 			arg1,
@@ -414,232 +745,12 @@ func (_c *MockCreditCollisionRepositoryInterface_TransferTx_Call) Run(run func(t
 	return _c
 }
 
-func (_c *MockCreditCollisionRepositoryInterface_TransferTx_Call) Return(r0 error) *MockCreditCollisionRepositoryInterface_TransferTx_Call {
-	_c.Call.Return(r0)
+func (_c *MockCreditCollisionRepositoryInterface_TransferTx_Call) Return(err error) *MockCreditCollisionRepositoryInterface_TransferTx_Call {
+	_c.Call.Return(err)
 	return _c
 }
 
 func (_c *MockCreditCollisionRepositoryInterface_TransferTx_Call) RunAndReturn(run func(tx *gorm.DB, fromCreditID uint, toCreditID uint, toMovieContentID string) error) *MockCreditCollisionRepositoryInterface_TransferTx_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// CloseByCreditTx provides a mock function for the type MockCreditCollisionRepositoryInterface
-func (_mock *MockCreditCollisionRepositoryInterface) CloseByCreditTx(tx *gorm.DB, creditID uint, resolution string) error {
-	ret := _mock.Called(tx, creditID, resolution)
-
-	if len(ret) == 0 {
-		panic("no return value specified for CloseByCreditTx")
-	}
-
-	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(*gorm.DB, uint, string) error); ok {
-		r0 = returnFunc(tx, creditID, resolution)
-	} else {
-		r0 = ret.Error(0)
-	}
-	return r0
-}
-
-// MockCreditCollisionRepositoryInterface_CloseByCreditTx_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CloseByCreditTx'
-type MockCreditCollisionRepositoryInterface_CloseByCreditTx_Call struct {
-	*mock.Call
-}
-
-// CloseByCreditTx is a helper method to define mock.On call
-//   - tx *gorm.DB
-//   - creditID uint
-//   - resolution string
-func (_e *MockCreditCollisionRepositoryInterface_Expecter) CloseByCreditTx(tx any, creditID any, resolution any) *MockCreditCollisionRepositoryInterface_CloseByCreditTx_Call {
-	return &MockCreditCollisionRepositoryInterface_CloseByCreditTx_Call{Call: _e.mock.On("CloseByCreditTx", tx, creditID, resolution)}
-}
-
-func (_c *MockCreditCollisionRepositoryInterface_CloseByCreditTx_Call) Run(run func(tx *gorm.DB, creditID uint, resolution string)) *MockCreditCollisionRepositoryInterface_CloseByCreditTx_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 *gorm.DB
-		if args[0] != nil {
-			arg0 = args[0].(*gorm.DB)
-		}
-		arg1 := args[1].(uint)
-		arg2 := args[2].(string)
-		run(
-			arg0,
-			arg1,
-			arg2,
-		)
-	})
-	return _c
-}
-
-func (_c *MockCreditCollisionRepositoryInterface_CloseByCreditTx_Call) Return(r0 error) *MockCreditCollisionRepositoryInterface_CloseByCreditTx_Call {
-	_c.Call.Return(r0)
-	return _c
-}
-
-func (_c *MockCreditCollisionRepositoryInterface_CloseByCreditTx_Call) RunAndReturn(run func(tx *gorm.DB, creditID uint, resolution string) error) *MockCreditCollisionRepositoryInterface_CloseByCreditTx_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// CountOpenByMovieBatch provides a mock function for the type MockCreditCollisionRepositoryInterface
-func (_mock *MockCreditCollisionRepositoryInterface) CountOpenByMovieBatch(ctx context.Context, movieIDs []string) (map[string]int64, error) {
-	ret := _mock.Called(ctx, movieIDs)
-
-	if len(ret) == 0 {
-		panic("no return value specified for CountOpenByMovieBatch")
-	}
-
-	var r0 map[string]int64
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, []string) (map[string]int64, error)); ok {
-		r0, r1 = returnFunc(ctx, movieIDs)
-	} else {
-		r0 = ret.Get(0).(map[string]int64)
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockCreditCollisionRepositoryInterface_CountOpenByMovieBatch_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CountOpenByMovieBatch'
-type MockCreditCollisionRepositoryInterface_CountOpenByMovieBatch_Call struct {
-	*mock.Call
-}
-
-// CountOpenByMovieBatch is a helper method to define mock.On call
-//   - ctx context.Context
-//   - movieIDs []string
-func (_e *MockCreditCollisionRepositoryInterface_Expecter) CountOpenByMovieBatch(ctx any, movieIDs any) *MockCreditCollisionRepositoryInterface_CountOpenByMovieBatch_Call {
-	return &MockCreditCollisionRepositoryInterface_CountOpenByMovieBatch_Call{Call: _e.mock.On("CountOpenByMovieBatch", ctx, movieIDs)}
-}
-
-func (_c *MockCreditCollisionRepositoryInterface_CountOpenByMovieBatch_Call) Run(run func(ctx context.Context, movieIDs []string)) *MockCreditCollisionRepositoryInterface_CountOpenByMovieBatch_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		arg0 := args[0].(context.Context)
-		var arg1 []string
-		if args[1] != nil {
-			arg1 = args[1].([]string)
-		}
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *MockCreditCollisionRepositoryInterface_CountOpenByMovieBatch_Call) Return(r0 map[string]int64, r1 error) *MockCreditCollisionRepositoryInterface_CountOpenByMovieBatch_Call {
-	_c.Call.Return(r0, r1)
-	return _c
-}
-
-func (_c *MockCreditCollisionRepositoryInterface_CountOpenByMovieBatch_Call) RunAndReturn(run func(ctx context.Context, movieIDs []string) (map[string]int64, error)) *MockCreditCollisionRepositoryInterface_CountOpenByMovieBatch_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// FindByID provides a mock function for the type MockCreditCollisionRepositoryInterface
-func (_mock *MockCreditCollisionRepositoryInterface) FindByID(ctx context.Context, id uint) (*models.CreditCollision, error) {
-	ret := _mock.Called(ctx, id)
-
-	if len(ret) == 0 {
-		panic("no return value specified for FindByID")
-	}
-
-	var r0 *models.CreditCollision
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, uint) (*models.CreditCollision, error)); ok {
-		r0, r1 = returnFunc(ctx, id)
-	} else {
-		r0 = ret.Get(0).(*models.CreditCollision)
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockCreditCollisionRepositoryInterface_FindByID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FindByID'
-type MockCreditCollisionRepositoryInterface_FindByID_Call struct {
-	*mock.Call
-}
-
-// FindByID is a helper method to define mock.On call
-//   - ctx context.Context
-//   - id uint
-func (_e *MockCreditCollisionRepositoryInterface_Expecter) FindByID(ctx any, id any) *MockCreditCollisionRepositoryInterface_FindByID_Call {
-	return &MockCreditCollisionRepositoryInterface_FindByID_Call{Call: _e.mock.On("FindByID", ctx, id)}
-}
-
-func (_c *MockCreditCollisionRepositoryInterface_FindByID_Call) Run(run func(ctx context.Context, id uint)) *MockCreditCollisionRepositoryInterface_FindByID_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		arg0 := args[0].(context.Context)
-		arg1 := args[1].(uint)
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *MockCreditCollisionRepositoryInterface_FindByID_Call) Return(r0 *models.CreditCollision, r1 error) *MockCreditCollisionRepositoryInterface_FindByID_Call {
-	_c.Call.Return(r0, r1)
-	return _c
-}
-
-func (_c *MockCreditCollisionRepositoryInterface_FindByID_Call) RunAndReturn(run func(ctx context.Context, id uint) (*models.CreditCollision, error)) *MockCreditCollisionRepositoryInterface_FindByID_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// CloseByCredit provides a mock function for the type MockCreditCollisionRepositoryInterface
-func (_mock *MockCreditCollisionRepositoryInterface) CloseByCredit(ctx context.Context, creditID uint, resolution string) error {
-	ret := _mock.Called(ctx, creditID, resolution)
-
-	if len(ret) == 0 {
-		panic("no return value specified for CloseByCredit")
-	}
-
-	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, uint, string) error); ok {
-		r0 = returnFunc(ctx, creditID, resolution)
-	} else {
-		r0 = ret.Error(0)
-	}
-	return r0
-}
-
-// MockCreditCollisionRepositoryInterface_CloseByCredit_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CloseByCredit'
-type MockCreditCollisionRepositoryInterface_CloseByCredit_Call struct {
-	*mock.Call
-}
-
-// CloseByCredit is a helper method to define mock.On call
-//   - ctx context.Context
-//   - creditID uint
-//   - resolution string
-func (_e *MockCreditCollisionRepositoryInterface_Expecter) CloseByCredit(ctx any, creditID any, resolution any) *MockCreditCollisionRepositoryInterface_CloseByCredit_Call {
-	return &MockCreditCollisionRepositoryInterface_CloseByCredit_Call{Call: _e.mock.On("CloseByCredit", ctx, creditID, resolution)}
-}
-
-func (_c *MockCreditCollisionRepositoryInterface_CloseByCredit_Call) Run(run func(ctx context.Context, creditID uint, resolution string)) *MockCreditCollisionRepositoryInterface_CloseByCredit_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		arg0 := args[0].(context.Context)
-		arg1 := args[1].(uint)
-		arg2 := args[2].(string)
-		run(
-			arg0,
-			arg1,
-			arg2,
-		)
-	})
-	return _c
-}
-
-func (_c *MockCreditCollisionRepositoryInterface_CloseByCredit_Call) Return(r0 error) *MockCreditCollisionRepositoryInterface_CloseByCredit_Call {
-	_c.Call.Return(r0)
-	return _c
-}
-
-func (_c *MockCreditCollisionRepositoryInterface_CloseByCredit_Call) RunAndReturn(run func(ctx context.Context, creditID uint, resolution string) error) *MockCreditCollisionRepositoryInterface_CloseByCredit_Call {
 	_c.Call.Return(run)
 	return _c
 }
