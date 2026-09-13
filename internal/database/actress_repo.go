@@ -59,9 +59,9 @@ func (r *ActressRepository) RenameNameFields(ctx context.Context, id uint, first
 		return wrapDBErr("rename", "actress id 0", ErrInvalidLookup)
 	}
 	updates := map[string]interface{}{
-		"first_name":    firstName,
-		"last_name":     lastName,
-		"japanese_name": japaneseName,
+		colFirstName:    firstName,
+		colLastName:     lastName,
+		colJapaneseName: japaneseName,
 	}
 	if err := r.GetDB().WithContext(ctx).Model(&models.Actress{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 		return wrapDBErr("rename", fmt.Sprintf("actress %d", id), err)
@@ -387,9 +387,9 @@ func (r *ActressRepository) PromoteCandidate(ctx context.Context, id uint, first
 	updates := map[string]interface{}{
 		"verified":      true,
 		"origin":        ActressOriginUser,
-		"first_name":    firstName,
-		"last_name":     lastName,
-		"japanese_name": japaneseName,
+		colFirstName:    firstName,
+		colLastName:     lastName,
+		colJapaneseName: japaneseName,
 		"thumb_url":     thumbURL,
 	}
 	if err := r.GetDB().WithContext(ctx).Model(&models.Actress{}).Where("id = ?", id).Updates(updates).Error; err != nil {
@@ -413,9 +413,9 @@ func (r *ActressRepository) SetUserOwned(ctx context.Context, id uint) error {
 // fields, marks the row user-owned, and dirties crediting movies.
 func (r *ActressRepository) UpdateCanonicalFields(ctx context.Context, id uint, firstName, lastName, japaneseName, thumbURL string) error {
 	updates := map[string]interface{}{
-		"first_name":    firstName,
-		"last_name":     lastName,
-		"japanese_name": japaneseName,
+		colFirstName:    firstName,
+		colLastName:     lastName,
+		colJapaneseName: japaneseName,
 		"thumb_url":     thumbURL,
 		"origin":        ActressOriginUser,
 		"verified":      true,

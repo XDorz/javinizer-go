@@ -15,8 +15,8 @@ const (
 // CreditOrigin implements the credit identity lifecycle contract.
 type CreditOrigin string
 
+// Credit fields identify the conflicting attribution.
 const (
-	// CreditFieldCreditedName implements the credit identity lifecycle contract.
 	CreditFieldCreditedName = "credited_name"
 	// CreditFieldReportedThumb implements the credit identity lifecycle contract.
 	CreditFieldReportedThumb = "reported_thumb_url"
@@ -30,8 +30,8 @@ const (
 	CollisionStatusResolved = "resolved"
 )
 
+// Collision resolutions record how a conflict was settled.
 const (
-	// CollisionResolutionKeepIdentity implements the credit identity lifecycle contract.
 	CollisionResolutionKeepIdentity = "keep_identity"
 	// CollisionResolutionAdoptCanonical implements the credit identity lifecycle contract.
 	CollisionResolutionAdoptCanonical = "adopt_canonical"
@@ -65,12 +65,12 @@ type MovieCredit struct {
 	UpdatedAt             time.Time `json:"updated_at"`
 }
 
-// MovieCredit implements the credit identity lifecycle contract.
+// TableName returns the credit table name.
 func (MovieCredit) TableName() string {
 	return "movie_credits"
 }
 
-// MovieCredit implements the credit identity lifecycle contract.
+// EffectiveOrigin defaults unspecified origins to scrape ownership.
 func (c *MovieCredit) EffectiveOrigin() string {
 	if c.Origin == string(CreditOriginUser) {
 		return string(CreditOriginUser)
@@ -78,12 +78,12 @@ func (c *MovieCredit) EffectiveOrigin() string {
 	return string(CreditOriginScrape)
 }
 
-// MovieCredit implements the credit identity lifecycle contract.
+// IsScrapeOwned reports whether scraping may manage this credit.
 func (c *MovieCredit) IsScrapeOwned() bool {
 	return c.Origin != string(CreditOriginUser) && !c.UserOverride && !c.Suppressed
 }
 
-// MovieCredit implements the credit identity lifecycle contract.
+// DisplayName resolves the override, canonical, or credited name.
 func (c *MovieCredit) DisplayName(actress *Actress) string {
 	if c.UserOverride && strings.TrimSpace(c.OverrideName) != "" {
 		return c.OverrideName
@@ -118,17 +118,17 @@ type CreditCollision struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
-// CreditCollision implements the credit identity lifecycle contract.
+// TableName returns the collision table name.
 func (CreditCollision) TableName() string {
 	return "credit_collisions"
 }
 
-// CreditCollision implements the credit identity lifecycle contract.
+// IsOpen reports whether the collision awaits resolution.
 func (c *CreditCollision) IsOpen() bool {
 	return c.Status == CollisionStatusOpen
 }
 
-// CreditCollision implements the credit identity lifecycle contract.
+// AddSource records a distinct nonempty source.
 func (c *CreditCollision) AddSource(source string) {
 	source = strings.TrimSpace(source)
 	if source == "" {
@@ -146,7 +146,7 @@ func (c *CreditCollision) AddSource(source string) {
 	c.SourcesSeen = c.SourcesSeen + "," + source
 }
 
-// CreditCollision implements the credit identity lifecycle contract.
+// DistinctSourceCount returns the number of recorded sources.
 func (c *CreditCollision) DistinctSourceCount() int {
 	if c.SourcesSeen == "" {
 		return 0

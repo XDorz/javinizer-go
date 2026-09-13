@@ -190,7 +190,7 @@ func (p *PriorityConfig) PerFieldOverride(fieldKey string) []string {
 func (p PriorityConfig) MarshalJSON() ([]byte, error) {
 	m := make(map[string]any, 1+len(p.Fields))
 	if p.Priority != nil {
-		m["priority"] = p.Priority
+		m[priorityKey] = p.Priority
 	}
 	for k, v := range p.Fields {
 		m[k] = v
@@ -213,7 +213,7 @@ func (p *PriorityConfig) UnmarshalJSON(data []byte) error {
 func (p PriorityConfig) MarshalYAML() (interface{}, error) {
 	m := make(map[string]any, 1+len(p.Fields))
 	if p.Priority != nil {
-		m["priority"] = p.Priority
+		m[priorityKey] = p.Priority
 	}
 	for k, v := range p.Fields {
 		m[k] = v
@@ -238,7 +238,7 @@ func (p *PriorityConfig) UnmarshalYAML(node *yaml.Node) error {
 func (p *PriorityConfig) decodeFromMap(raw map[string]any) error {
 	p.Fields = make(map[string][]string)
 	for key, value := range raw {
-		if key == "priority" {
+		if key == priorityKey {
 			if value == nil {
 				p.Priority = nil
 				continue

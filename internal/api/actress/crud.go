@@ -190,7 +190,7 @@ func getActress(deps ActressDeps) gin.HandlerFunc {
 		actress, err := deps.ActressRepo.FindByID(c.Request.Context(), id)
 		if err != nil {
 			if database.IsNotFound(err) {
-				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "actress not found"})
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: actressNotFoundMessage})
 				return
 			}
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
@@ -277,7 +277,7 @@ func updateActress(deps ActressDeps) gin.HandlerFunc {
 		existing, err := deps.ActressRepo.FindByID(c.Request.Context(), id)
 		if err != nil {
 			if database.IsNotFound(err) {
-				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "actress not found"})
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: actressNotFoundMessage})
 				return
 			}
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
@@ -347,7 +347,7 @@ func deleteActress(deps ActressDeps) gin.HandlerFunc {
 		existing, err := deps.ActressRepo.FindByID(c.Request.Context(), id)
 		if err != nil {
 			if database.IsNotFound(err) {
-				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "actress not found"})
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: actressNotFoundMessage})
 				return
 			}
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})

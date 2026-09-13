@@ -124,18 +124,6 @@ func findVerifiedByNameTx(tx *gorm.DB, japaneseName, firstName, lastName string)
 	return matched, nil
 }
 
-func findCandidateByDMMIDTx(tx *gorm.DB, dmmID int) (*models.Actress, error) {
-	if dmmID <= 0 {
-		return nil, gorm.ErrRecordNotFound
-	}
-	var found models.Actress
-	err := tx.First(&found, "dmm_id = ?", dmmID).Error
-	if err != nil {
-		return nil, err
-	}
-	return &found, nil
-}
-
 func findCandidateByNameKeyTx(tx *gorm.DB, nameKey string) (*models.Actress, error) {
 	if nameKey == "" {
 		return nil, gorm.ErrRecordNotFound

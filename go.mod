@@ -2,8 +2,6 @@ module github.com/javinizer/javinizer-go
 
 go 1.26.6
 
-toolchain go1.25.5
-
 require (
 	github.com/Eyevinn/mp4ff v0.51.0
 	github.com/PuerkitoBio/goquery v1.8.1

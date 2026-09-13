@@ -15,7 +15,7 @@ import (
 // MergeResolution values select which side of an actress merge a field conflict resolves to.
 const (
 	MergeResolutionTarget = "target"
-	MergeResolutionSource = "source"
+	MergeResolutionSource = colSource
 	resolutionTarget      = "target"
 )
 
@@ -147,7 +147,7 @@ func moveCredits(tx *gorm.DB, sourceID, targetID uint) error {
 			Where("movie_content_id = ? AND actress_id = ?", sc.MovieContentID, targetID).
 			First(&targetCredit).Error
 		if err == nil {
-			updates := map[string]interface{}{"updated_at": time.Now().UTC()}
+			updates := map[string]interface{}{colUpdatedAt: time.Now().UTC()}
 			if sc.UserOverride && !targetCredit.UserOverride {
 				updates["override_name"] = sc.OverrideName
 				updates["user_override"] = true
@@ -179,7 +179,7 @@ func moveCredits(tx *gorm.DB, sourceID, targetID uint) error {
 		} else if errors.Is(err, gorm.ErrRecordNotFound) {
 			if err := tx.Model(&models.MovieCredit{}).Where("id = ?", sc.ID).Updates(map[string]interface{}{
 				"actress_id": targetID,
-				"updated_at": time.Now().UTC(),
+				colUpdatedAt: time.Now().UTC(),
 			}).Error; err != nil {
 				return err
 			}
@@ -234,7 +234,7 @@ func upsertActressAliases(tx *gorm.DB, aliases []string, canonicalName string) e
 		}
 		if err := tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "alias_name"}},
-			DoUpdates: clause.AssignmentColumns([]string{"canonical_name", "updated_at"}),
+			DoUpdates: clause.AssignmentColumns([]string{"canonical_name", colUpdatedAt}),
 		}).Create(&entry).Error; err != nil {
 			return err
 		}
@@ -375,20 +375,20 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 				if tempDMMID == 0 {
 					tempDMMID = -1
 				}
-				if err := tx.Model(&models.Actress{}).Where("id = ?", sourceID).Update("dmm_id", tempDMMID).Error; err != nil {
+				if err := tx.Model(&models.Actress{}).Where("id = ?", sourceID).Update(colDMMID, tempDMMID).Error; err != nil {
 					return wrapDBErr("update", fmt.Sprintf("merge actress %d temp dmm_id", sourceID), err)
 				}
 			}
 		}
 
 		if err := tx.Model(&models.Actress{}).Where("id = ?", targetID).Updates(map[string]any{
-			"dmm_id":        merged.DMMID,
-			"first_name":    merged.FirstName,
-			"last_name":     merged.LastName,
-			"japanese_name": merged.JapaneseName,
+			colDMMID:        merged.DMMID,
+			colFirstName:    merged.FirstName,
+			colLastName:     merged.LastName,
+			colJapaneseName: merged.JapaneseName,
 			"thumb_url":     merged.ThumbURL,
 			"aliases":       merged.Aliases,
-			"updated_at":    time.Now().UTC(),
+			colUpdatedAt:    time.Now().UTC(),
 		}).Error; err != nil {
 			if errors.Is(err, gorm.ErrDuplicatedKey) {
 				return ErrActressMergeUniqueConstraint

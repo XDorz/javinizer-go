@@ -91,7 +91,7 @@ func (u *MovieUpserter) UpsertWithTranslations(ctx context.Context, movie *model
 			// Step 4: Upsert actresses — credit pipeline when credits are present,
 			// legacy ensure-exist path otherwise.
 			if movie.Credits != nil {
-				if err := u.persistCreditsTx(ctx, tx, movie); err != nil {
+				if err := u.persistCreditsTx(tx, movie); err != nil {
 					return err
 				}
 			} else if err := u.upsertActressesTx(tx, movie); err != nil {
@@ -480,7 +480,7 @@ func (u *MovieUpserter) ensureActressesExistTx(tx *gorm.DB, actresses []models.A
 	return nil
 }
 
-func (u *MovieUpserter) persistCreditsTx(ctx context.Context, tx *gorm.DB, movie *models.Movie) error {
+func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error {
 	policy := NormalizeCollisionPolicy(movie.CreditPolicy)
 	trusted := make(map[string]bool, len(movie.TrustedCollisionSources))
 	for _, s := range movie.TrustedCollisionSources {

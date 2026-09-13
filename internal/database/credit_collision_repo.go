@@ -183,8 +183,7 @@ func (r *CreditCollisionRepository) CloseByCreditTx(tx *gorm.DB, creditID uint, 
 		}).Error
 }
 
-// CreditCollisionRepository implements the credit identity lifecycle contract.
-// CreditCollisionRepository implements the credit identity lifecycle contract.
+// CloseByCredit closes open collisions attached to a credit.
 func (r *CreditCollisionRepository) CloseByCredit(ctx context.Context, creditID uint, resolution string) error {
 	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		return r.CloseByCreditTx(tx, creditID, resolution)

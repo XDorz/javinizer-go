@@ -7,10 +7,19 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/models"
 )
 
-const errorKey = "error"
+type candidateListResponse struct {
+	Candidates []models.Actress `json:"candidates"`
+	Total      int64            `json:"total"`
+}
+
+type collisionListResponse struct {
+	Collisions []models.CreditCollision `json:"collisions"`
+}
 
 // ListCandidates handles GET /actresses/candidates — quarantined scrape-created identities.
 //
@@ -20,7 +29,7 @@ const errorKey = "error"
 //	@Produce		json
 //	@Param			limit	query		int	false	"Max results"	default(50)
 //	@Param			offset	query		int	false	"Skip results"	default(0)
-//	@Success		200		{object}	object{candidates=[]models.Actress,total=int}
+//	@Success		200		{object}	candidateListResponse
 //	@Failure		500		{object}	contracts.ErrorResponse
 //	@Router			/api/v1/actresses/candidates [get]
 func ListCandidates(deps ActressDeps) gin.HandlerFunc {
@@ -29,15 +38,15 @@ func ListCandidates(deps ActressDeps) gin.HandlerFunc {
 		offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 		candidates, err := deps.ActressRepo.ListCandidates(c.Request.Context(), limit, offset)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{errorKey: err.Error()})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 		count, err := deps.ActressRepo.CountCandidates(c.Request.Context())
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{errorKey: err.Error()})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"candidates": candidates, "total": count})
+		c.JSON(http.StatusOK, candidateListResponse{Candidates: candidates, Total: count})
 	}
 }
 
@@ -67,21 +76,21 @@ func PromoteCandidate(deps ActressDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{errorKey: "invalid candidate id"})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "invalid candidate id"})
 			return
 		}
 		var req promoteRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{errorKey: err.Error()})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 		existing, err := deps.ActressRepo.FindByID(c.Request.Context(), uint(id))
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{errorKey: "candidate not found"})
+			c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: "candidate not found"})
 			return
 		}
 		if existing.Verified {
-			c.JSON(http.StatusConflict, gin.H{errorKey: "identity is already verified"})
+			c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: "identity is already verified"})
 			return
 		}
 		first, last, jp := req.FirstName, req.LastName, req.JapaneseName
@@ -93,12 +102,12 @@ func PromoteCandidate(deps ActressDeps) gin.HandlerFunc {
 			thumb = existing.ThumbURL
 		}
 		if err := deps.ActressRepo.PromoteCandidate(c.Request.Context(), uint(id), first, last, jp, thumb); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{errorKey: err.Error()})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 		updated, err := deps.ActressRepo.FindByID(c.Request.Context(), uint(id))
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{errorKey: err.Error()})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, updated)
@@ -129,30 +138,30 @@ func ResolveCollision(deps ActressDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{errorKey: "invalid collision id"})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "invalid collision id"})
 			return
 		}
 		var req resolveRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{errorKey: err.Error()})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 		if deps.DB == nil {
-			c.JSON(http.StatusInternalServerError, gin.H{errorKey: "database not configured"})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "database not configured"})
 			return
 		}
 		service := database.NewCollisionService(deps.DB)
 		remaining, err := service.Resolve(c.Request.Context(), uint(id), req.Resolution, req.TargetActressID)
 		if err != nil {
 			if database.IsNotFound(err) {
-				c.JSON(http.StatusNotFound, gin.H{errorKey: err.Error()})
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: err.Error()})
 				return
 			}
 			if errors.Is(err, database.ErrCollisionNotOpen) {
-				c.JSON(http.StatusConflict, gin.H{errorKey: err.Error()})
+				c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: err.Error()})
 				return
 			}
-			c.JSON(http.StatusBadRequest, gin.H{errorKey: err.Error()})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"resolved": true, "remaining_open": remaining})
@@ -166,7 +175,7 @@ func ResolveCollision(deps ActressDeps) gin.HandlerFunc {
 //	@Tags			actresses
 //	@Produce		json
 //	@Param			movie_id	query		string	true	"Movie content ID"
-//	@Success		200			{object}	object{collisions=[]models.CreditCollision}
+//	@Success		200			{object}	collisionListResponse
 //	@Failure		400			{object}	contracts.ErrorResponse
 //	@Failure		500			{object}	contracts.ErrorResponse
 //	@Router			/api/v1/actresses/collisions [get]
@@ -174,15 +183,15 @@ func ListCollisions(deps ActressDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		movieID := c.Query("movie_id")
 		if movieID == "" {
-			c.JSON(http.StatusBadRequest, gin.H{errorKey: "movie_id is required"})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "movie_id is required"})
 			return
 		}
 		collisions, err := deps.CreditCollisionRepo.ListOpenByMovie(c.Request.Context(), movieID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{errorKey: err.Error()})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"collisions": collisions})
+		c.JSON(http.StatusOK, collisionListResponse{Collisions: collisions})
 	}
 }
 
@@ -208,25 +217,25 @@ func UpdateCreditOverride(deps ActressDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{errorKey: "invalid credit id"})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "invalid credit id"})
 			return
 		}
 		var req overrideRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{errorKey: err.Error()})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 		if deps.DB == nil {
-			c.JSON(http.StatusInternalServerError, gin.H{errorKey: "database not configured"})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "database not configured"})
 			return
 		}
 		service := database.NewCollisionService(deps.DB)
 		if err := service.UpdateCreditOverride(c.Request.Context(), uint(id), req.OverrideName, req.UserOverride); err != nil {
 			if database.IsNotFound(err) {
-				c.JSON(http.StatusNotFound, gin.H{errorKey: err.Error()})
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: err.Error()})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{errorKey: err.Error()})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -254,25 +263,25 @@ func SuppressCredit(deps ActressDeps) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{errorKey: "invalid credit id"})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "invalid credit id"})
 			return
 		}
 		var req suppressRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{errorKey: err.Error()})
+			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 		if deps.DB == nil {
-			c.JSON(http.StatusInternalServerError, gin.H{errorKey: "database not configured"})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "database not configured"})
 			return
 		}
 		service := database.NewCollisionService(deps.DB)
 		if err := service.SetCreditSuppressed(c.Request.Context(), uint(id), req.Suppressed); err != nil {
 			if database.IsNotFound(err) {
-				c.JSON(http.StatusNotFound, gin.H{errorKey: err.Error()})
+				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: err.Error()})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{errorKey: err.Error()})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})

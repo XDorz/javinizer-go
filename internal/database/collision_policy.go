@@ -9,8 +9,8 @@ import (
 // CollisionPolicy is the configured collision resolution strategy.
 type CollisionPolicy string
 
+// Collision policies control automatic resolution.
 const (
-	// CollisionPolicyBlock implements the credit identity lifecycle contract.
 	CollisionPolicyBlock     CollisionPolicy = "block"
 	CollisionPolicyAutoKeep  CollisionPolicy = "auto_keep"
 	CollisionPolicyAutoAlias CollisionPolicy = "auto_alias"

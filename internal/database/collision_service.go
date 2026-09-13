@@ -68,7 +68,8 @@ func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution s
 			}
 		}
 	case models.CollisionResolutionAdoptCanonical:
-		if collision.Field == models.CreditFieldIdentityLink {
+		switch collision.Field {
+		case models.CreditFieldIdentityLink:
 			updates := map[string]interface{}{
 				colVerified:  true,
 				colOrigin:    ActressOriginUser,
@@ -87,12 +88,12 @@ func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution s
 			if err := tx.Model(&models.Actress{}).Where("id = ?", credit.ActressID).Updates(updates).Error; err != nil {
 				return 0, wrapDBErr("adopt canonical", fmt.Sprintf("actress %d", credit.ActressID), err)
 			}
-		} else if collision.Field == models.CreditFieldReportedThumb {
+		case models.CreditFieldReportedThumb:
 			if err := tx.Model(&models.Actress{}).Where("id = ?", credit.ActressID).
 				Update("thumb_url", collision.ReportedValue).Error; err != nil {
 				return 0, wrapDBErr("adopt canonical", fmt.Sprintf("actress %d", credit.ActressID), err)
 			}
-		} else if collision.Field == models.CreditFieldCreditedName {
+		case models.CreditFieldCreditedName:
 			if isCJK(collision.ReportedValue) {
 				if err := tx.Model(&models.Actress{}).Where("id = ?", credit.ActressID).Updates(map[string]interface{}{
 					colJapaneseName: collision.ReportedValue,
