@@ -244,6 +244,8 @@ func runActressImport(cmd *cobra.Command, args []string, configFile string) erro
 
 	for i := range actresses {
 		a := &actresses[i]
+		a.Verified = true
+		a.Origin = database.ActressOriginUser
 		if a.ID > 0 {
 			existing, err := repo.FindByID(context.Background(), a.ID)
 			if err == nil {

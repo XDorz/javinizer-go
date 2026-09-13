@@ -195,6 +195,20 @@ func TestCollisionServiceAliasUpdatesExisting(t *testing.T) {
 	require.Equal(t, actress.FullName(), alias.CanonicalName)
 }
 
+func TestCollisionResolutionRejectsAliasForNonNameField(t *testing.T) {
+	db, service, _, collision := collisionFixture(t)
+	collision.Field = models.CreditFieldReportedThumb
+	collision.ReportedValue = "https://example.com/reported.jpg"
+	require.NoError(t, db.Save(&collision).Error)
+	_, err := service.Resolve(t.Context(), collision.ID, models.CollisionResolutionAdoptAlias, 0)
+	require.ErrorContains(t, err, "adopt_alias requires a credited_name collision")
+	require.NoError(t, db.First(&collision, collision.ID).Error)
+	require.Equal(t, models.CollisionStatusOpen, collision.Status)
+	var aliases int64
+	require.NoError(t, db.Model(&models.ActressAlias{}).Count(&aliases).Error)
+	require.Zero(t, aliases)
+}
+
 func TestCollisionServiceCancelledContext(t *testing.T) {
 	_, service, credit, collision := collisionFixture(t)
 	ctx, cancel := context.WithCancel(context.Background())

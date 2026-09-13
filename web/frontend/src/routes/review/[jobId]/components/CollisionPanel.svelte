@@ -157,7 +157,7 @@
 								{#if pendingCollisionId === collision.id}<Loader2 class="size-3.5 animate-spin" />{/if}
 								<Tag class="size-3.5" /> Adopt as truth
 							</Button>
-							{#if collision.field !== 'identity_link'}
+							{#if collision.field === 'credited_name'}
 								<Button
 									variant="outline"
 									size="sm"

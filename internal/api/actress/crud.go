@@ -243,6 +243,8 @@ func createActress(deps ActressDeps) gin.HandlerFunc {
 			JapaneseName: req.JapaneseName,
 			ThumbURL:     req.ThumbURL,
 			Aliases:      req.Aliases,
+			Verified:     true,
+			Origin:       database.ActressOriginUser,
 		}
 
 		if err := deps.ActressRepo.Create(c.Request.Context(), actress); err != nil {
@@ -475,6 +477,8 @@ func importActresses(deps ActressDeps) gin.HandlerFunc {
 					JapaneseName: japaneseName,
 					ThumbURL:     thumbURL,
 					Aliases:      aliases,
+					Verified:     true,
+					Origin:       database.ActressOriginUser,
 				}
 				if err := repo.Create(c.Request.Context(), actress); err != nil {
 					errorsCount++

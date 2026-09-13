@@ -59,8 +59,8 @@ CREATE TABLE IF NOT EXISTS movie_credits (
     display_force_canonical BOOLEAN NOT NULL DEFAULT 0,
     created_at DATETIME,
     updated_at DATETIME,
-    CONSTRAINT fk_movie_credits_movie FOREIGN KEY (movie_content_id) REFERENCES movies(content_id),
-    CONSTRAINT fk_movie_credits_actress FOREIGN KEY (actress_id) REFERENCES actresses(id)
+    CONSTRAINT fk_movie_credits_movie FOREIGN KEY (movie_content_id) REFERENCES movies(content_id) ON DELETE CASCADE,
+    CONSTRAINT fk_movie_credits_actress FOREIGN KEY (actress_id) REFERENCES actresses(id) ON DELETE CASCADE
 );
 -- +goose StatementEnd
 
@@ -107,8 +107,8 @@ CREATE TABLE IF NOT EXISTS credit_collisions (
     last_seen_at DATETIME,
     created_at DATETIME,
     updated_at DATETIME,
-    CONSTRAINT fk_credit_collisions_credit FOREIGN KEY (credit_id) REFERENCES movie_credits(id),
-    CONSTRAINT fk_credit_collisions_movie FOREIGN KEY (movie_content_id) REFERENCES movies(content_id)
+    CONSTRAINT fk_credit_collisions_credit FOREIGN KEY (credit_id) REFERENCES movie_credits(id) ON DELETE CASCADE,
+    CONSTRAINT fk_credit_collisions_movie FOREIGN KEY (movie_content_id) REFERENCES movies(content_id) ON DELETE CASCADE
 );
 -- +goose StatementEnd
 

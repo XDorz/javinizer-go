@@ -295,6 +295,22 @@ func (m *Movie) Clone() *Movie {
 			}
 		}
 	}
+	if m.Credits != nil {
+		clone.Credits = make([]MovieCredit, len(m.Credits))
+		copy(clone.Credits, m.Credits)
+		for i := range clone.Credits {
+			if clone.Credits[i].Scraped.Translations != nil {
+				clone.Credits[i].Scraped.Translations = append([]ActressTranslation(nil), clone.Credits[i].Scraped.Translations...)
+			}
+			if m.Credits[i].Actress != nil {
+				actress := *m.Credits[i].Actress
+				if actress.Translations != nil {
+					actress.Translations = append([]ActressTranslation(nil), actress.Translations...)
+				}
+				clone.Credits[i].Actress = &actress
+			}
+		}
+	}
 	if m.Genres != nil {
 		clone.Genres = make([]Genre, len(m.Genres))
 		copy(clone.Genres, m.Genres)

@@ -117,6 +117,9 @@ func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution s
 			}
 		}
 	case models.CollisionResolutionAdoptAlias:
+		if collision.Field != models.CreditFieldCreditedName {
+			return 0, fmt.Errorf("resolve collision: adopt_alias requires a credited_name collision")
+		}
 		if err := tx.Model(&models.MovieCredit{}).Where("id = ?", credit.ID).
 			Update("display_force_canonical", true).Error; err != nil {
 			return 0, wrapDBErr("force canonical", fmt.Sprintf("credit %d", credit.ID), err)
