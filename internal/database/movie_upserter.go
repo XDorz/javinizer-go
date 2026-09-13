@@ -233,10 +233,6 @@ func (u *MovieUpserter) reconcileLegacyActressEditsTx(tx *gorm.DB, movie *models
 	if err != nil {
 		return err
 	}
-	if len(existing) == 0 {
-		return nil
-	}
-
 	existingByActress := make(map[uint]models.MovieCredit, len(existing))
 	for _, credit := range existing {
 		existingByActress[credit.ActressID] = credit

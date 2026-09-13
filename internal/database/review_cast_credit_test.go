@@ -8,6 +8,25 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
+func TestLegacyMovieCastCreatesUserCredits(t *testing.T) {
+	db := newCreditTestDB(t)
+	repos := db.Repositories()
+	movie := &models.Movie{
+		ContentID: "legacy-cast-backfill",
+		ID:        "LEGACY-CAST-BACKFILL",
+		Actresses: []models.Actress{{FirstName: "Legacy"}},
+	}
+	saved, err := repos.MovieRepo.Upsert(t.Context(), movie)
+	require.NoError(t, err)
+	require.Len(t, saved.Actresses, 1)
+	credits, err := repos.MovieCreditRepo.ListByMovie(t.Context(), movie.ContentID)
+	require.NoError(t, err)
+	require.Len(t, credits, 1)
+	require.Equal(t, saved.Actresses[0].ID, credits[0].ActressID)
+	require.Equal(t, string(models.CreditOriginUser), credits[0].Origin)
+	require.True(t, credits[0].OrderPinned)
+}
+
 func TestLegacyCastEditReconcilesCredits(t *testing.T) {
 	db := newCreditTestDB(t)
 	repos := db.Repositories()
