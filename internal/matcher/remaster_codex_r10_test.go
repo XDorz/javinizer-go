@@ -21,6 +21,13 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 		{"IPX-535-H-720p.mkv", "IPX-535H"},
 		{"IPX-535-HD-480p.mkv", "IPX-535H"},
 		{"IPX-535-H-1080p.mkv", "IPX-535H"},
+		// Bare three-digit resolutions behave the same as the p-suffixed forms.
+		{"IPX-535-H-720.mkv", "IPX-535H"},
+		{"IPX-535-HD-480.mkv", "IPX-535H"},
+		{"IPX-535-H-576.mkv", "IPX-535H"},
+		// Numbered quality tags (HDR10, HEVC10) are tags, not catalog ids.
+		{"ABC.123.HD HDR10.mkv", "ABC-123H"},
+		{"ABC.123.HD HEVC10.mkv", "ABC-123H"},
 		// Codec tags still stay ambiguous.
 		{"IPX-535-H.264.mkv", "IPX-535"},
 		{"IPX-535-H264.mkv", "IPX-535"},
