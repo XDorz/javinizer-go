@@ -232,16 +232,25 @@ func (s *CollisionService) SetCreditSuppressed(ctx context.Context, creditID uin
 		if res.RowsAffected == 0 {
 			return fmt.Errorf("update suppressed: movie credit %d: %w", creditID, ErrNotFound)
 		}
-		if suppressed {
-			if err := tx.Model(&models.CreditCollision{}).
-				Where("credit_id = ? AND status = ?", creditID, models.CollisionStatusOpen).
-				Updates(map[string]interface{}{
-					colStatus:     models.CollisionStatusResolved,
-					colResolution: models.CollisionResolutionByRemoval,
-					colUpdatedAt:  time.Now().UTC(),
-				}).Error; err != nil {
-				return err
+		collisionUpdates := map[string]interface{}{
+			colStatus:     models.CollisionStatusResolved,
+			colResolution: models.CollisionResolutionByRemoval,
+			colUpdatedAt:  time.Now().UTC(),
+		}
+		collisionQuery := tx.Model(&models.CreditCollision{}).
+			Where("credit_id = ? AND status = ?", creditID, models.CollisionStatusOpen)
+		if !suppressed {
+			collisionUpdates = map[string]interface{}{
+				colStatus:     models.CollisionStatusOpen,
+				colResolution: "",
+				"user_pinned": true,
+				colUpdatedAt:  time.Now().UTC(),
 			}
+			collisionQuery = tx.Model(&models.CreditCollision{}).
+				Where("credit_id = ? AND status = ? AND resolution = ?", creditID, models.CollisionStatusResolved, models.CollisionResolutionByRemoval)
+		}
+		if err := collisionQuery.Updates(collisionUpdates).Error; err != nil {
+			return err
 		}
 		var contentID string
 		if err := tx.Model(&models.MovieCredit{}).Where("id = ?", creditID).Pluck("movie_content_id", &contentID).Error; err != nil {
@@ -297,6 +306,13 @@ func upsertAliasTx(tx *gorm.DB, alias *models.ActressAlias) error {
 }
 
 func reassignCreditTx(tx *gorm.DB, credit *models.MovieCredit, targetActressID uint) error {
+	var target models.Actress
+	if err := tx.Where("id = ? AND verified = ?", targetActressID, true).First(&target).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("reassign credit: target actress %d: %w", targetActressID, ErrNotFound)
+		}
+		return wrapDBErr("find", fmt.Sprintf("target actress %d", targetActressID), err)
+	}
 	var targetCredit models.MovieCredit
 	err := tx.Model(&models.MovieCredit{}).
 		Where("movie_content_id = ? AND actress_id = ?", credit.MovieContentID, targetActressID).

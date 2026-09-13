@@ -607,14 +607,14 @@ func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error
 			projections = append(projections, a)
 		}
 	}
+	movie.Actresses = projections
 	if len(projections) > 0 {
-		movie.Actresses = projections
 		if err := u.ensureActressesExistTx(tx, projections); err != nil {
 			return err
 		}
-		if err := tx.Model(movie).Association("Actresses").Replace(movie.Actresses); err != nil {
-			return err
-		}
+	}
+	if err := tx.Model(movie).Association("Actresses").Replace(movie.Actresses); err != nil {
+		return err
 	}
 	return nil
 }

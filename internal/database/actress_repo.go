@@ -37,6 +37,10 @@ func NewActressRepository(db *DB) *ActressRepository {
 
 // Create inserts a new actress record.
 func (r *ActressRepository) Create(ctx context.Context, actress *models.Actress) error {
+	if actress.Origin == "" {
+		actress.Verified = true
+		actress.Origin = ActressOriginUser
+	}
 	return r.BaseRepository.Create(ctx, actress)
 }
 
@@ -90,7 +94,11 @@ func (r *ActressRepository) Delete(ctx context.Context, id uint) error {
 
 // Count returns the total number of actress records.
 func (r *ActressRepository) Count(ctx context.Context) (int64, error) {
-	return r.BaseRepository.Count(ctx)
+	var count int64
+	if err := r.catalogQuery(ctx).Model(&models.Actress{}).Count(&count).Error; err != nil {
+		return 0, wrapDBErr("count", "actresses", err)
+	}
+	return count, nil
 }
 
 // FindByDMMID loads the actress with the given DMM identifier, returning
@@ -152,7 +160,11 @@ func (r *ActressRepository) FindByJapaneseNameAndDMMID(ctx context.Context, name
 
 // ListAll returns every actress record in the default sort order.
 func (r *ActressRepository) ListAll(ctx context.Context) ([]models.Actress, error) {
-	return r.BaseRepository.ListAll(ctx)
+	var actresses []models.Actress
+	if err := r.catalogQuery(ctx).Order(r.defaultOrder).Find(&actresses).Error; err != nil {
+		return nil, wrapDBErr("list", "actresses", err)
+	}
+	return actresses, nil
 }
 
 // FindOrCreate returns the existing actress with the given Japanese name, or
@@ -171,7 +183,18 @@ func (r *ActressRepository) FindOrCreate(ctx context.Context, actress *models.Ac
 
 // List returns a page of actresses limited by limit and offset.
 func (r *ActressRepository) List(ctx context.Context, limit, offset int) ([]models.Actress, error) {
-	return r.BaseRepository.List(ctx, limit, offset)
+	var actresses []models.Actress
+	query := r.catalogQuery(ctx).Order(r.defaultOrder)
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if offset > 0 {
+		query = query.Offset(offset)
+	}
+	if err := query.Find(&actresses).Error; err != nil {
+		return nil, wrapDBErr("list", "actresses", err)
+	}
+	return actresses, nil
 }
 
 // ListSorted returns a page of actresses ordered by the validated sortBy and
@@ -183,7 +206,7 @@ func (r *ActressRepository) ListSorted(ctx context.Context, limit, offset int, s
 	if err != nil {
 		return nil, err
 	}
-	dbq := r.GetDB().WithContext(ctx)
+	dbq := r.catalogQuery(ctx)
 	for _, clause := range actressOrderClauses(sortBy, sortOrder) {
 		dbq = dbq.Order(clause)
 	}
@@ -201,7 +224,7 @@ func (r *ActressRepository) SearchPaged(ctx context.Context, query string, limit
 	var actresses []models.Actress
 
 	searchPattern := "%" + query + "%"
-	err := r.GetDB().WithContext(ctx).Where("first_name LIKE ? OR last_name LIKE ? OR japanese_name LIKE ?",
+	err := r.catalogQuery(ctx).Where("first_name LIKE ? OR last_name LIKE ? OR japanese_name LIKE ?",
 		searchPattern, searchPattern, searchPattern).
 		Order("japanese_name ASC, last_name ASC, first_name ASC, id ASC").
 		Limit(limit).
@@ -224,7 +247,7 @@ func (r *ActressRepository) SearchPagedSorted(ctx context.Context, query string,
 	}
 	searchPattern := "%" + query + "%"
 
-	dbq := r.GetDB().WithContext(ctx).Where("first_name LIKE ? OR last_name LIKE ? OR japanese_name LIKE ?",
+	dbq := r.catalogQuery(ctx).Where("first_name LIKE ? OR last_name LIKE ? OR japanese_name LIKE ?",
 		searchPattern, searchPattern, searchPattern)
 	for _, clause := range actressOrderClauses(sortBy, sortOrder) {
 		dbq = dbq.Order(clause)
@@ -241,7 +264,7 @@ func (r *ActressRepository) SearchPagedSorted(ctx context.Context, query string,
 func (r *ActressRepository) CountSearch(ctx context.Context, query string) (int64, error) {
 	var count int64
 	searchPattern := "%" + query + "%"
-	err := r.GetDB().WithContext(ctx).Model(&models.Actress{}).
+	err := r.catalogQuery(ctx).Model(&models.Actress{}).
 		Where("first_name LIKE ? OR last_name LIKE ? OR japanese_name LIKE ?",
 			searchPattern, searchPattern, searchPattern).
 		Count(&count).Error
@@ -257,7 +280,7 @@ func (r *ActressRepository) Search(ctx context.Context, query string) ([]models.
 	var actresses []models.Actress
 
 	if query == "" {
-		err := r.GetDB().WithContext(ctx).Limit(100).Order("japanese_name ASC, last_name ASC, first_name ASC").Find(&actresses).Error
+		err := r.catalogQuery(ctx).Limit(100).Order("japanese_name ASC, last_name ASC, first_name ASC").Find(&actresses).Error
 		if err != nil {
 			return nil, wrapDBErr("find", "actresses", err)
 		}
@@ -265,7 +288,7 @@ func (r *ActressRepository) Search(ctx context.Context, query string) ([]models.
 	}
 
 	searchPattern := "%" + query + "%"
-	err := r.GetDB().WithContext(ctx).Where("first_name LIKE ? OR last_name LIKE ? OR japanese_name LIKE ?",
+	err := r.catalogQuery(ctx).Where("first_name LIKE ? OR last_name LIKE ? OR japanese_name LIKE ?",
 		searchPattern, searchPattern, searchPattern).
 		Order("japanese_name ASC, last_name ASC, first_name ASC").
 		Limit(50).
@@ -537,6 +560,10 @@ func (r *ActressRepository) markCreditingMoviesDirty(ctx context.Context, actres
 	).Error; err != nil {
 		logging.Warnf("dirty-mark crediting movies for actress %d failed: %v", actressID, err)
 	}
+}
+
+func (r *ActressRepository) catalogQuery(ctx context.Context) *gorm.DB {
+	return r.GetDB().WithContext(ctx).Where("verified = ?", true)
 }
 
 // FreshTranslationsByActress returns translations whose source name still

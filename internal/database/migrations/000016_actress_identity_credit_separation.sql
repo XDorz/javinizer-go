@@ -130,27 +130,6 @@ DROP TABLE IF EXISTS movie_credits;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
-CREATE TABLE movie_actresses_restore_016 (
-    movie_content_id TEXT,
-    actress_id INTEGER,
-    PRIMARY KEY (movie_content_id, actress_id)
-);
--- +goose StatementEnd
-
--- +goose StatementBegin
-INSERT INTO movie_actresses_restore_016 (movie_content_id, actress_id)
-    SELECT movie_content_id, actress_id FROM movie_actresses_backup_016;
--- +goose StatementEnd
-
--- +goose StatementBegin
-DROP TABLE IF EXISTS movie_actresses;
--- +goose StatementEnd
-
--- +goose StatementBegin
-ALTER TABLE movie_actresses_restore_016 RENAME TO movie_actresses;
--- +goose StatementEnd
-
--- +goose StatementBegin
 DROP TABLE IF EXISTS movie_actresses_backup_016;
 -- +goose StatementEnd
 

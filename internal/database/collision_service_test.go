@@ -137,6 +137,10 @@ func TestCollisionServiceOverrideAndSuppression(t *testing.T) {
 	require.Equal(t, models.CollisionResolutionByRemoval, collision.Resolution)
 	require.Equal(t, models.CollisionStatusResolved, collision.Status)
 	require.NoError(t, service.SetCreditSuppressed(ctx, credit.ID, false))
+	require.NoError(t, db.First(&collision, collision.ID).Error)
+	require.Equal(t, models.CollisionStatusOpen, collision.Status)
+	require.Empty(t, collision.Resolution)
+	require.True(t, collision.UserPinned)
 	require.NoError(t, service.UpdateCreditOverride(ctx, credit.ID, "", false))
 	require.NoError(t, db.First(&credit, credit.ID).Error)
 	require.False(t, credit.Suppressed)
@@ -179,6 +183,28 @@ func TestCollisionServiceReassignMergesUserFieldsAndCollisions(t *testing.T) {
 	var count int64
 	require.NoError(t, db.Model(&models.MovieCredit{}).Where("id = ?", source.ID).Count(&count).Error)
 	require.Zero(t, count)
+}
+
+func TestCollisionServiceReassignRejectsInvalidTarget(t *testing.T) {
+	for _, target := range []models.Actress{{}, {FirstName: "Candidate", Origin: "scrape"}} {
+		db, service, _, collision := collisionFixture(t)
+		targetID := uint(999)
+		if target.FirstName != "" {
+			require.NoError(t, db.Create(&target).Error)
+			targetID = target.ID
+		}
+		_, err := service.Resolve(t.Context(), collision.ID, models.CollisionResolutionReassign, targetID)
+		require.ErrorIs(t, err, ErrNotFound)
+		require.NoError(t, db.First(&collision, collision.ID).Error)
+		require.Equal(t, models.CollisionStatusOpen, collision.Status)
+	}
+}
+
+func TestReassignCreditReturnsLookupError(t *testing.T) {
+	db := newCreditTestDB(t)
+	require.NoError(t, db.Close())
+	err := reassignCreditTx(db.DB, &models.MovieCredit{}, 1)
+	require.Error(t, err)
 }
 
 func TestCollisionServiceAliasUpdatesExisting(t *testing.T) {

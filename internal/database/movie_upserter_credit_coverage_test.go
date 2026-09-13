@@ -119,6 +119,14 @@ func TestPersistCreditsTxReconcileBranches(t *testing.T) {
 	skipMovie.SkipCreditReconcile = true
 	require.NoError(t, u.persistCreditsTx(db.DB, skipMovie))
 	require.NoError(t, db.First(&skip, skip.ID).Error)
+
+	associationMovie := creditCoverageMovie(t, db, "credit-empty-association")
+	associationMovie.Actresses = []models.Actress{actresses[0]}
+	require.NoError(t, db.Model(associationMovie).Association("Actresses").Replace(associationMovie.Actresses))
+	associationMovie.Credits = []models.MovieCredit{}
+	require.NoError(t, u.persistCreditsTx(db.DB, associationMovie))
+	count := db.Model(associationMovie).Association("Actresses").Count()
+	require.Zero(t, count)
 }
 
 func TestRecordFieldCollisionsTxBranches(t *testing.T) {
