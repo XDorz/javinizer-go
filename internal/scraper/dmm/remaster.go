@@ -459,15 +459,19 @@ func (s *scraper) verifyCandidateDisplayID(ctx context.Context, id string, urls 
 		}
 		if doc, err := goquery.NewDocumentFromReader(strings.NewReader(body)); err == nil {
 			if display := extractDisplayID(doc); display != "" {
-				identities[display] = struct{}{}
+				// Equivalent spellings (RCT-156-HD, RCT156HD) parse to the same
+				// pinned identity; counting raw strings would reject an otherwise
+				// uniquely correct candidate as unverifiable.
+				if ds, dd, dsuf, dm, ok := displayIdentityTuple(display); ok {
+					identities[ds+"\x00"+dd+"\x00"+dsuf+"\x00"+dm] = struct{}{}
+				}
 			}
 		}
 	}
 	if len(identities) == 1 {
 		ts, td, tsuf, tm, tok := displayIdentityTuple(id)
-		for k := range identities {
-			ds, dd, dsuf, dm, dok := displayIdentityTuple(k)
-			if tok && dok && ds == ts && dd == td && dsuf == tsuf && dm == tm {
+		if tok {
+			if _, ok := identities[ts+"\x00"+td+"\x00"+tsuf+"\x00"+tm]; ok {
 				return displayVerified, nil
 			}
 		}

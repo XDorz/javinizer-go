@@ -11,7 +11,8 @@ var (
 	reRemasterRemainder     = regexp.MustCompile(`(?i)^[-_.\s]?(HD|AI|H)(?:$|[-_.\s[\]()])`)
 	remasterCodecTailRegex  = regexp.MustCompile(`(?i)^[-_.\s]?\d{3}(?:\D|$)`)
 	contentIDShapeRegex     = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])((?:\d+(?:t28|[A-Za-z]+)\d+[A-Za-z]{0,3}|(?:t28|[A-Za-z]+)\d{4,5}[A-Za-z]{0,3}))(?:[-_.\s[\]()](.*)$|$)`)
-	trailingCatalogIDRegex  = regexp.MustCompile(`(?i)(?:[a-z]{1,}-(?:\d{2}|[0-3689]\d\d|4[0-79]\d|48[1-9]|5[0-689]\d|57[0-57-9]|7[0-13-9]\d|72[1-9])\b|[a-z]{1,}-\d{6,}\b|[a-z]{1,}-\d{1,6}[-._\s]?(?:hd|ai|h)\b|t28-\d{1,}\b|[hn]_\d+[a-z]+\d+|\b[a-z]+\d{4,5}[a-z]{0,3}\b|\b\d+[a-z]{2,}\d+[a-z]{0,3}\b|\b(?:t28|[a-z]{1,})[-._\s]\d{1,6}[-._\s]?(?:hd|ai|h)\b|\b[a-z]{2,6}\d{1,6}\b|\b[a-z](?:\d{5}|\d{4}|[013-9]\d\d|2(?:[013-9]\d|4\d|6[0-35-9]))\b)`)
+	trailingCatalogIDRegex  = regexp.MustCompile(`(?i)(?:[a-z]{1,}-(?:\d{2}|[0-3689]\d\d|4[0-79]\d|48[1-9]|5[0-689]\d|57[0-57-9]|7[0-13-9]\d|72[1-9])\b|[a-z]{1,}-\d{6,}\b|[a-z]{1,}-\d{1,6}[-._\s]?(?:hd|ai|h)\b|t28-\d{1,}\b|[hn]_\d+[a-z]+\d+|\b[a-z]+\d{4,5}[a-z]{0,3}\b|\b\d+[a-z]{2,}\d+[a-z]{0,3}\b|\b(?:t28|[a-z]{1,})[-._\s]\d{1,6}[-._\s]?(?:hd|ai|h)\b|\b[a-z]{2,6}\d{1,6}\b|\b[a-z](?:\d{5}|\d{4}|[013-9]\d\d|2(?:[013-9]\d|4\d|6[0-36-9]))\b)`)
+	trailingQualityTagRegex = regexp.MustCompile(`(?i)\b(?:[hx]26[456789]|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr|av1)\b`)
 	remasterPartLabelRegex  = regexp.MustCompile(`(?i)\b(?:part|pt|disc|vol|cd)-?\d{1,2}\b`)
 	resolutionTokenRegex    = regexp.MustCompile(`(?i)^\d{3,4}x\d{3,4}$`)
 	resolutionTailRegex     = regexp.MustCompile(`(?i)^[-_.\s]?(?:\d{3,4}[pi]|\d{3,4}x\d{3,4})(?:\D|$)`)
@@ -43,7 +44,9 @@ func normalizeFusedRemasterFilename(name string) string {
 	// Part labels (part-2, pt 3) are not catalog ids and must not suppress
 	// the fused normalization.
 	remainder := remasterPartLabelRegex.ReplaceAllString(name[m[1]:], "")
-	if trailingCatalogIDRegex.MatchString(remainder) {
+	// Compact codec/resolution tags (x265, FHD720) also match the trailing id
+	// alternatives; they are tags, not replacement ids, so veto the suppression.
+	if trailingCatalogIDRegex.MatchString(remainder) && !trailingQualityTagRegex.MatchString(remainder) {
 		return normalizeFusedRemasterFilename(name[m[1]:])
 	}
 	// A prefix-free compact t28 tail with a three-digit number reads as the
