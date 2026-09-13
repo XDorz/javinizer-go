@@ -31,6 +31,9 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 		// Container/container-spelled quality tags (MP3, MP4) are tags too.
 		{"ABC.123.HD MP3.mkv", "ABC-123H"},
 		{"ABC.123.HD MP4.mkv", "ABC-123H"},
+		// Numbered Dolby audio tags (DDP5.1, EAC3) are tags too.
+		{"ABC.123.HD DDP5.1.mkv", "ABC-123H"},
+		{"ABC.123.HD EAC3.mkv", "ABC-123H"},
 		// Codec tags still stay ambiguous.
 		{"IPX-535-H.264.mkv", "IPX-535"},
 		{"IPX-535-H264.mkv", "IPX-535"},

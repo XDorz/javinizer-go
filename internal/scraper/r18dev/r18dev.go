@@ -379,14 +379,20 @@ func (r *r18ContentIDResolver) ResolveURL(ctx context.Context, id string) (strin
 						continue
 					}
 					returnedDVDID := normalizeDVDID(lookupData.DVDID)
-					if foldedMarker != "" && lookupData.DVDID != "" && foldDisplay(lookupData.DVDID) == foldDisplay(id) {
+					if foldedMarker != "" && lookupData.DVDID != "" && displayIDsMatchByIdentity(lookupData.DVDID, id) {
 						// Marker-carrying display identity match (H/HD-folded) — trust it.
 						contentID := lookupData.ContentID
 						logging.Debugf("R18: ✓ Resolved marker query %s (display %s) to content-id: %s", id, lookupData.DVDID, contentID)
 						return fmt.Sprintf("%s/videos/vod/movies/detail/-/combined=%s/json", baseURL, contentID), true
 					}
 					if returnedDVDID == idVariation {
-						// Exact dvd_id match — trust it immediately.
+						// Exact normalized dvd_id match — trust it immediately, unless
+						// normalization collapsed a pinned T/T28 boundary: a marker query
+						// only trusts a row whose display identity agrees.
+						if foldedMarker != "" && lookupData.DVDID != "" && !displayIDsMatchByIdentity(lookupData.DVDID, id) {
+							// claims a conflicting display identity; do not trust it
+							continue
+						}
 						contentID := lookupData.ContentID
 						logging.Debugf("R18: ✓ Resolved %s (tried: %s) to content-id: %s", id, idVariation, contentID)
 						return fmt.Sprintf("%s/videos/vod/movies/detail/-/combined=%s/json", baseURL, contentID), true
