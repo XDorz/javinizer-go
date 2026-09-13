@@ -140,6 +140,14 @@ func TestResolveVerifiedSingleNameIdentity(t *testing.T) {
 	}
 }
 
+func TestResolveSingleNameCandidateLookupError(t *testing.T) {
+	db := newCreditTestDB(t)
+	injectDatabaseCallbackError(t, db, "query", "actresses", 2)
+	_, outcome, err := ResolveActressIdentityTx(db.DB, &models.Actress{FirstName: "Missing"})
+	require.Error(t, err)
+	require.Equal(t, ResolutionCandidateLinked, outcome)
+}
+
 func TestResolveAmbiguousSingleNameIdentity(t *testing.T) {
 	db := newCreditTestDB(t)
 	for i := 0; i < 2; i++ {
