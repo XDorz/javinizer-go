@@ -132,15 +132,15 @@ func (m *Matcher) MatchFile(file models.FileMatchInfo) *MatchResult {
 
 // matchWithRegex attempts to match a filename with a specific regex pattern
 func (m *Matcher) matchWithRegex(file models.FileMatchInfo, filename string, pattern *regexp.Regexp, matchType string) *MatchResult {
-	matches := pattern.FindStringSubmatch(filename)
-	if len(matches) == 0 {
+	loc := pattern.FindStringSubmatchIndex(filename)
+	if len(loc) == 0 {
 		return nil
 	}
-	if len(matches) <= 1 {
+	if len(loc) <= 2 {
 		// No capture group means no usable ID for matcher output.
 		return nil
 	}
-	id := strings.TrimSpace(matches[1])
+	id := strings.TrimSpace(filename[loc[2]:loc[3]])
 	if id == "" {
 		// Empty capture should be treated as no match to allow fallback behavior.
 		return nil
@@ -155,7 +155,10 @@ func (m *Matcher) matchWithRegex(file models.FileMatchInfo, filename string, pat
 	result.ID = strings.ToUpper(id)
 
 	if matchType == "builtin" {
-		if spelling, suffix := splitRemasterMarker(remainderAfterID(filename, id)); spelling != "" {
+		// The suffix comes after the actual match location: the id text may
+		// also occur earlier inside an ineligible token, and remainderAfterID
+		// would inspect the wrong occurrence.
+		if spelling, suffix := splitRemasterMarker(strings.TrimSpace(filename[loc[3]:])); spelling != "" {
 			result.ID += foldRemasterMarker(spelling)
 			result.RemasterMarker = spelling
 			num, partSuffix, patternType, trailingPrefix := DetectPartSuffix(suffix, "")
@@ -231,10 +234,12 @@ func (m *Matcher) MatchString(s string) string {
 	}
 
 	// Try built-in pattern
-	matches := m.builtinPattern.FindStringSubmatch(s)
-	if len(matches) > 1 && !builtinStartsInsideContentID(s, m.builtinPattern) {
-		id := strings.ToUpper(matches[1])
-		if spelling := remasterMarkerSpelling(remainderAfterID(s, matches[1])); spelling != "" {
+	loc := m.builtinPattern.FindStringSubmatchIndex(s)
+	if loc != nil && !builtinStartsInsideContentID(s, m.builtinPattern) {
+		id := strings.ToUpper(s[loc[2]:loc[3]])
+		// The suffix comes after the actual match location: the id text may
+		// also occur earlier inside an ineligible token.
+		if spelling := remasterMarkerSpelling(strings.TrimSpace(s[loc[1]:])); spelling != "" {
 			return id + foldRemasterMarker(spelling)
 		}
 		// Apply the same E/Z catalog-suffix stripping as matchWithRegex so MatchString

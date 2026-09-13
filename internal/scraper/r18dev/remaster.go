@@ -220,6 +220,22 @@ func markerVariationAccept(body []byte, queryID, foldedMarker, series string) bo
 		return true
 	}
 	if data.DVDID != "" {
+		// Compact foldDisplay erases the separator-pinned T/T28 boundary
+		// (T-28123-HD and T28-123-HD both fold to t28123h); compare parsed
+		// identity tuples instead, falling back for unparseable spellings.
+		dSeries, dNumber, dSuffix, dMarker, dOK := r18ParseRemasterTail(data.DVDID)
+		qSeries, qNumber, qSuffix, qMarker, qOK := r18ParseRemasterTail(queryID)
+		if dOK && qOK {
+			fold := func(m string) string {
+				if m == "hd" {
+					return "h"
+				}
+				return m
+			}
+			return dSeries == qSeries &&
+				strings.TrimLeft(dNumber, "0") == strings.TrimLeft(qNumber, "0") &&
+				dSuffix == qSuffix && fold(dMarker) == fold(qMarker)
+		}
 		return foldDisplay(data.DVDID) == foldDisplay(queryID)
 	}
 	return true

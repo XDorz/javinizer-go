@@ -257,8 +257,6 @@ func TestMatchString_RemasterParity(t *testing.T) {
 }
 
 func TestRemasterHelpersAndDemotionSkips(t *testing.T) {
-	assert.Equal(t, "zzz", remainderAfterID("zzz", "abc"))
-	assert.Equal(t, "-2", remainderAfterID("RCT-156-2", "RCT-156"))
 
 	mk := func(name, id string, part int, pattern, marker string) MatchResult {
 		return MatchResult{File: models.FileMatchInfo{Path: "/v/" + name}, ID: id, PartNumber: part, MultipartPattern: pattern, RemasterMarker: marker}

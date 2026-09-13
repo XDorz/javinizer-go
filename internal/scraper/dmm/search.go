@@ -277,7 +277,9 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 
 	foldedMarker, _, _, isCID := classifyRemasterQuery(id)
 	res, err := s.parseHTMLWithOptions(ctx, doc, url, foldedMarker != "")
-	if err == nil && foldedMarker != "" && !isCID {
+	// The page's authoritative 品番 (zero-trimmed by the site) outranks the
+	// query-derived spelling; only fill in when the page provided nothing.
+	if err == nil && foldedMarker != "" && !isCID && res.ID == "" {
 		res.ID = canonicalRemasterDisplayID(id)
 	}
 	return res, err

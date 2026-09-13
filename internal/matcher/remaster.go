@@ -58,16 +58,6 @@ func normalizeFusedRemasterFilename(name string) string {
 	return name[:m[3]] + "-" + name[m[4]:]
 }
 
-func remainderAfterID(name, id string) string {
-	lowerName := strings.ToLower(name)
-	lowerID := strings.ToLower(id)
-	idx := strings.Index(lowerName, lowerID)
-	if idx < 0 {
-		return strings.TrimSpace(name)
-	}
-	return strings.TrimSpace(name[idx+len(id):])
-}
-
 func splitRemasterMarker(remainder string) (string, string) {
 	remainder = strings.TrimSpace(remainder)
 	m := reRemasterRemainder.FindStringSubmatchIndex(remainder)

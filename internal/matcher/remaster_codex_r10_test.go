@@ -36,6 +36,9 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 		{"QUALITY 1080 HD ABC123.mkv", "ABC123"},
 		{"QUALITY 1080 HD A123.mkv", "A123"},
 		{"QUALITY 1080 HD ABCDEFGHI.123.HD.mkv", "ABCDEFGHI-123H"},
+		// The marker suffix comes after the ACTUAL match occurrence, not the
+		// first textual occurrence of the id inside an ineligible token.
+		{"prefixABC123 junk ABC123-HD.mkv", "ABC123H"},
 		{"1080p IPX-535-H-720p.mkv", "IPX-535H"},
 		// Ordinary hyphen-number tags after a real separated remaster never
 		// suppress it, whatever the fallback matcher would pick instead.
