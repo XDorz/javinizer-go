@@ -56,6 +56,10 @@ func findVerifiedByAliasTx(tx *gorm.DB, japaneseName, firstName, lastName string
 			strings.TrimSpace(firstName+" "+lastName),
 			strings.TrimSpace(lastName+" "+firstName),
 		)
+	} else if first := strings.TrimSpace(firstName); first != "" {
+		lookups = append(lookups, first)
+	} else if last := strings.TrimSpace(lastName); last != "" {
+		lookups = append(lookups, last)
 	}
 	if len(lookups) == 0 {
 		return nil, nil

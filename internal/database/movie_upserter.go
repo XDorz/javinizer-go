@@ -612,6 +612,13 @@ func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error
 			continue
 		}
 
+		identityReported := ""
+		if outcome == ResolutionAmbiguous {
+			identityReported = scraped.FullName()
+		}
+		if err := collisionRepo.resolveSupersededOpenTx(tx, credit.ID, models.CreditFieldIdentityLink, identityReported); err != nil {
+			return err
+		}
 		if outcome == ResolutionAmbiguous {
 			collision := &models.CreditCollision{
 				CreditID:       credit.ID,
@@ -723,6 +730,16 @@ func (u *MovieUpserter) recordFieldCollisionsTx(tx *gorm.DB, collisionRepo *Cred
 	if strings.TrimSpace(reportedThumb) != "" && strings.TrimSpace(resolved.ThumbURL) != "" &&
 		reportedThumb != resolved.ThumbURL {
 		conflicts = append(conflicts, fieldConflict{field: models.CreditFieldReportedThumb, reported: reportedThumb, canonical: resolved.ThumbURL})
+	}
+
+	active := make(map[string]string, len(conflicts))
+	for _, conflict := range conflicts {
+		active[conflict.field] = conflict.reported
+	}
+	for _, field := range []string{models.CreditFieldCreditedName, models.CreditFieldReportedThumb} {
+		if err := collisionRepo.resolveSupersededOpenTx(tx, credit.ID, field, active[field]); err != nil {
+			return err
+		}
 	}
 
 	for _, c := range conflicts {

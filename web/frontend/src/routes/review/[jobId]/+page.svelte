@@ -359,8 +359,8 @@
 							nfoDifferences={s.nfoDifferences}
 							/>
 
-							{#if s.currentMovie?.content_id}
-								<CollisionPanel movieContentId={s.currentMovie.content_id} />
+							{#if s.currentMovie?.code}
+								<CollisionPanel movieContentId={s.currentMovie.code} />
 							{/if}
 
 							<Card class="p-6">

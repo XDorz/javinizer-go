@@ -140,6 +140,29 @@ func TestResolveVerifiedSingleNameIdentity(t *testing.T) {
 	}
 }
 
+func TestResolveVerifiedSingleNameAlias(t *testing.T) {
+	for _, test := range []struct {
+		actress models.Actress
+		scraped models.Actress
+		alias   string
+	}{
+		{actress: models.Actress{FirstName: "Canonical"}, scraped: models.Actress{FirstName: "AliasFirst"}, alias: "AliasFirst"},
+		{actress: models.Actress{LastName: "Canonical"}, scraped: models.Actress{LastName: "AliasLast"}, alias: "AliasLast"},
+	} {
+		t.Run(test.alias, func(t *testing.T) {
+			db := newCreditTestDB(t)
+			test.actress.Verified = true
+			test.actress.Origin = ActressOriginUser
+			require.NoError(t, db.Create(&test.actress).Error)
+			require.NoError(t, db.Create(&models.ActressAlias{AliasName: test.alias, CanonicalName: test.actress.FullName()}).Error)
+			found, outcome, err := ResolveActressIdentityTx(db.DB, &test.scraped)
+			require.NoError(t, err)
+			require.Equal(t, ResolutionMatched, outcome)
+			require.Equal(t, test.actress.ID, found.ID)
+		})
+	}
+}
+
 func TestResolveSingleNameCandidateLookupError(t *testing.T) {
 	db := newCreditTestDB(t)
 	injectDatabaseCallbackError(t, db, "query", "actresses", 2)

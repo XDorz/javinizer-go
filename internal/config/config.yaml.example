@@ -265,6 +265,7 @@ metadata:
         enabled: true
         auto_add: true        # Automatically add new actresses to database
         convert_alias: false  # Convert actress names using alias database
+        candidate_retention_days: 30 # Delete creditless scrape candidates after 30 days
 
     # Genre replacement/normalization database (SQLite-backed)
     genre_replacement:

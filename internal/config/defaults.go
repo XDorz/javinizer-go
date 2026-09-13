@@ -156,9 +156,10 @@ func defaultMetadataConfig() MetadataConfig {
 			Priority: nil, // Derived from registered scraper priorities at runtime
 		},
 		ActressDatabase: ActressDatabaseConfig{
-			Enabled:      true,
-			AutoAdd:      true,
-			ConvertAlias: false,
+			Enabled:                true,
+			AutoAdd:                true,
+			ConvertAlias:           false,
+			CandidateRetentionDays: 30,
 		},
 		GenreReplacement: GenreReplacementConfig{
 			Enabled: true,

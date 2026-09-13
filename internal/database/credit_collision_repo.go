@@ -73,6 +73,22 @@ func (r *CreditCollisionRepository) RecordTx(tx *gorm.DB, collision *models.Cred
 	return nil
 }
 
+func (r *CreditCollisionRepository) resolveSupersededOpenTx(tx *gorm.DB, creditID uint, field, reportedValue string) error {
+	query := tx.Model(&models.CreditCollision{}).
+		Where("credit_id = ? AND field = ? AND status = ? AND user_pinned = ?", creditID, field, models.CollisionStatusOpen, false)
+	if reportedValue != "" {
+		query = query.Where("reported_value <> ?", reportedValue)
+	}
+	if err := query.Updates(map[string]interface{}{
+		colStatus:     models.CollisionStatusResolved,
+		colResolution: models.CollisionResolutionByRemoval,
+		colUpdatedAt:  time.Now().UTC(),
+	}).Error; err != nil {
+		return wrapDBErr("resolve superseded", fmt.Sprintf("credit %d/%s", creditID, field), err)
+	}
+	return nil
+}
+
 // ListOpenByMovie returns open collisions for the given movie.
 func (r *CreditCollisionRepository) ListOpenByMovie(ctx context.Context, movieContentID string) ([]models.CreditCollision, error) {
 	var collisions []models.CreditCollision

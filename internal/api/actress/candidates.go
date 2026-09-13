@@ -94,8 +94,14 @@ func PromoteCandidate(deps ActressDeps) gin.HandlerFunc {
 			return
 		}
 		first, last, jp := req.FirstName, req.LastName, req.JapaneseName
-		if first == "" && last == "" && jp == "" {
-			first, last, jp = existing.FirstName, existing.LastName, existing.JapaneseName
+		if first == "" {
+			first = existing.FirstName
+		}
+		if last == "" {
+			last = existing.LastName
+		}
+		if jp == "" {
+			jp = existing.JapaneseName
 		}
 		thumb := req.ThumbURL
 		if thumb == "" {
