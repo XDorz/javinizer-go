@@ -24,7 +24,11 @@ var (
 )
 
 func (s *scraper) parseHTML(ctx context.Context, doc *goquery.Document, sourceURL string) (*models.ScraperResult, error) {
-	return s.parseHTMLWithOptions(ctx, doc, sourceURL, false)
+	// Direct-URL scrapes take the same marker-aware path as search results: a
+	// marker-bearing URL cid (dv00899ai) defers to the page's authoritative
+	// 品番 instead of the cid-derived spelling.
+	marker, _, _, _ := classifyRemasterQuery(extractContentIDFromURL(sourceURL))
+	return s.parseHTMLWithOptions(ctx, doc, sourceURL, marker != "")
 }
 
 // parseHTMLWithOptions is parseHTML plus marker-path identity control: when

@@ -345,9 +345,9 @@ func TestParseHTMLVerbatim_PersistsFullCID(t *testing.T) {
 	assert.Equal(t, "1rct00156h", res.ContentID)
 	assert.Equal(t, "RCT-156H", res.ID)
 
-	res, err = s.parseHTML(context.Background(), doc, "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1rct00156h/")
+	res, err = s.parseHTML(context.Background(), doc, "https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=1ipx00535/")
 	require.NoError(t, err)
-	assert.Equal(t, "rct00156h", res.ContentID, "marker-free parsing keeps prefix-cleaned identity")
+	assert.Equal(t, "ipx00535", res.ContentID, "marker-free parsing keeps prefix-cleaned identity")
 }
 
 func TestParseHTMLVerbatim_MarkerUsesPageDisplayID(t *testing.T) {
