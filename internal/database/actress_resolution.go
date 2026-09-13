@@ -96,8 +96,10 @@ func findVerifiedByAliasTx(tx *gorm.DB, japaneseName, firstName, lastName string
 
 func findVerifiedByNameTx(tx *gorm.DB, japaneseName, firstName, lastName string) ([]models.Actress, error) {
 	hasJP := strings.TrimSpace(japaneseName) != ""
-	hasBoth := firstName != "" && lastName != ""
-	if !hasJP && !hasBoth {
+	hasFirst := strings.TrimSpace(firstName) != ""
+	hasLast := strings.TrimSpace(lastName) != ""
+	hasBoth := hasFirst && hasLast
+	if !hasJP && !hasFirst && !hasLast {
 		return nil, nil
 	}
 	var verifiedAll []models.Actress
@@ -118,6 +120,14 @@ func findVerifiedByNameTx(tx *gorm.DB, japaneseName, firstName, lastName string)
 			continue
 		}
 		if hasBoth && targetFL != "" && targetFL == models.NormalizeActressNameKey(a.FirstName+" "+a.LastName) {
+			matched = append(matched, a)
+			continue
+		}
+		if hasFirst && !hasLast && strings.TrimSpace(a.LastName) == "" && models.NormalizeActressNameKey(firstName) == models.NormalizeActressNameKey(a.FirstName) {
+			matched = append(matched, a)
+			continue
+		}
+		if hasLast && !hasFirst && strings.TrimSpace(a.FirstName) == "" && models.NormalizeActressNameKey(lastName) == models.NormalizeActressNameKey(a.LastName) {
 			matched = append(matched, a)
 		}
 	}

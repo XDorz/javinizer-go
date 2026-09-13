@@ -220,47 +220,51 @@ func (s *CollisionService) UpdateCreditOverride(ctx context.Context, creditID ui
 // closes its open collisions when suppressed.
 func (s *CollisionService) SetCreditSuppressed(ctx context.Context, creditID uint, suppressed bool) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		updates := map[string]interface{}{
-			colSuppressed: suppressed,
-			colOrigin:     string(models.CreditOriginUser),
-			colUpdatedAt:  time.Now().UTC(),
-		}
-		res := tx.Model(&models.MovieCredit{}).Where("id = ?", creditID).Updates(updates)
-		if res.Error != nil {
-			return wrapDBErr("update suppressed", fmt.Sprintf("movie credit %d", creditID), res.Error)
-		}
-		if res.RowsAffected == 0 {
-			return fmt.Errorf("update suppressed: movie credit %d: %w", creditID, ErrNotFound)
-		}
-		collisionUpdates := map[string]interface{}{
-			colStatus:     models.CollisionStatusResolved,
-			colResolution: models.CollisionResolutionByRemoval,
-			colUpdatedAt:  time.Now().UTC(),
-		}
-		collisionQuery := tx.Model(&models.CreditCollision{}).
-			Where("credit_id = ? AND status = ?", creditID, models.CollisionStatusOpen)
-		if !suppressed {
-			collisionUpdates = map[string]interface{}{
-				colStatus:     models.CollisionStatusOpen,
-				colResolution: "",
-				"user_pinned": true,
-				colUpdatedAt:  time.Now().UTC(),
-			}
-			collisionQuery = tx.Model(&models.CreditCollision{}).
-				Where("credit_id = ? AND status = ? AND resolution = ?", creditID, models.CollisionStatusResolved, models.CollisionResolutionByRemoval)
-		}
-		if err := collisionQuery.Updates(collisionUpdates).Error; err != nil {
-			return err
-		}
-		var contentID string
-		if err := tx.Model(&models.MovieCredit{}).Where("id = ?", creditID).Pluck("movie_content_id", &contentID).Error; err != nil {
-			return err
-		}
-		return tx.Exec(
-			"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id = ?",
-			contentID,
-		).Error
+		return setCreditSuppressedTx(tx, creditID, suppressed)
 	})
+}
+
+func setCreditSuppressedTx(tx *gorm.DB, creditID uint, suppressed bool) error {
+	updates := map[string]interface{}{
+		colSuppressed: suppressed,
+		colOrigin:     string(models.CreditOriginUser),
+		colUpdatedAt:  time.Now().UTC(),
+	}
+	res := tx.Model(&models.MovieCredit{}).Where("id = ?", creditID).Updates(updates)
+	if res.Error != nil {
+		return wrapDBErr("update suppressed", fmt.Sprintf("movie credit %d", creditID), res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return fmt.Errorf("update suppressed: movie credit %d: %w", creditID, ErrNotFound)
+	}
+	collisionUpdates := map[string]interface{}{
+		colStatus:     models.CollisionStatusResolved,
+		colResolution: models.CollisionResolutionByRemoval,
+		colUpdatedAt:  time.Now().UTC(),
+	}
+	collisionQuery := tx.Model(&models.CreditCollision{}).
+		Where("credit_id = ? AND status = ?", creditID, models.CollisionStatusOpen)
+	if !suppressed {
+		collisionUpdates = map[string]interface{}{
+			colStatus:     models.CollisionStatusOpen,
+			colResolution: "",
+			"user_pinned": true,
+			colUpdatedAt:  time.Now().UTC(),
+		}
+		collisionQuery = tx.Model(&models.CreditCollision{}).
+			Where("credit_id = ? AND status = ? AND resolution = ?", creditID, models.CollisionStatusResolved, models.CollisionResolutionByRemoval)
+	}
+	if err := collisionQuery.Updates(collisionUpdates).Error; err != nil {
+		return err
+	}
+	var contentID string
+	if err := tx.Model(&models.MovieCredit{}).Where("id = ?", creditID).Pluck("movie_content_id", &contentID).Error; err != nil {
+		return err
+	}
+	return tx.Exec(
+		"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id = ?",
+		contentID,
+	).Error
 }
 
 func splitReportedName(reported string) (first, last string) {

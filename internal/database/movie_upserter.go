@@ -102,6 +102,11 @@ func (u *MovieUpserter) UpsertWithTranslations(ctx context.Context, movie *model
 			if err := u.upsertTranslationsTx(tx, movie, savedTranslations, genreTranslations, actressTranslations); err != nil {
 				return err
 			}
+			if movie.Credits == nil {
+				if err := u.reconcileLegacyActressEditsTx(tx, movie); err != nil {
+					return err
+				}
+			}
 
 			// Step 6: Reload with associations
 			var loaded models.Movie
@@ -222,6 +227,62 @@ func (u *MovieUpserter) upsertActressesTx(tx *gorm.DB, movie *models.Movie) erro
 	return nil
 }
 
+func (u *MovieUpserter) reconcileLegacyActressEditsTx(tx *gorm.DB, movie *models.Movie) error {
+	creditRepo := NewMovieCreditRepository(u.repo.GetDB())
+	existing, err := creditRepo.ListByMovieTx(tx, movie.ContentID)
+	if err != nil {
+		return err
+	}
+	if len(existing) == 0 {
+		return nil
+	}
+
+	existingByActress := make(map[uint]models.MovieCredit, len(existing))
+	for _, credit := range existing {
+		existingByActress[credit.ActressID] = credit
+	}
+	incoming := make(map[uint]bool, len(movie.Actresses))
+	for i := range movie.Actresses {
+		actress := &movie.Actresses[i]
+		incoming[actress.ID] = true
+		if credit, ok := existingByActress[actress.ID]; ok {
+			if credit.Suppressed {
+				if err := setCreditSuppressedTx(tx, credit.ID, false); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		credit := &models.MovieCredit{
+			MovieContentID:       movie.ContentID,
+			ActressID:            actress.ID,
+			CreditedName:         actress.FullName(),
+			CreditedJapaneseName: actress.JapaneseName,
+			ReportedThumbURL:     actress.ThumbURL,
+			Origin:               string(models.CreditOriginUser),
+			OrderIndex:           i,
+			OrderPinned:          true,
+		}
+		if err := creditRepo.UpsertTx(tx, credit); err != nil {
+			return err
+		}
+		if err := tx.Exec(
+			"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id = ?",
+			movie.ContentID,
+		).Error; err != nil {
+			return err
+		}
+	}
+	for _, credit := range existing {
+		if !incoming[credit.ActressID] && !credit.Suppressed {
+			if err := setCreditSuppressedTx(tx, credit.ID, true); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // upsertTranslationsTx saves the core movie record (without translation slice)
 // and persists all translations (movie, genre, actress).
 func (u *MovieUpserter) upsertTranslationsTx(tx *gorm.DB, movie *models.Movie, translations []models.MovieTranslation, genreTranslations []models.GenreTranslationData, actressTranslations []models.ActressTranslationData) error {
@@ -338,6 +399,10 @@ func (u *MovieUpserter) resolveActressGroup(tx *gorm.DB, actresses []models.Actr
 			}
 			actresses[g.index] = existing
 		} else {
+			if g.act.Origin == "" {
+				g.act.Verified = true
+				g.act.Origin = ActressOriginUser
+			}
 			// A missing ID-keyed entry (idGroup) references a stale/deleted primary
 			// key; create a genuinely new record with an auto-assigned id instead of
 			// re-inserting with the stale PK (which could resurrect the row or merge
