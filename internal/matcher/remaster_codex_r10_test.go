@@ -34,6 +34,8 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 		{"FHD 1080 HD T28 123 HD.mkv", "T28-123H"},
 		{"QUALITY 1080 HD AB123.mkv", "AB123"},
 		{"QUALITY 1080 HD ABC123.mkv", "ABC123"},
+		{"QUALITY 1080 HD A123.mkv", "A123"},
+		{"QUALITY 1080 HD ABCDEFGHI.123.HD.mkv", "ABCDEFGHI-123H"},
 		{"1080p IPX-535-H-720p.mkv", "IPX-535H"},
 		// Plain forms are unchanged.
 		{"ABC.123.HD.mkv", "ABC-123H"},
