@@ -65,3 +65,10 @@ func TestDisplayIdentityTupleSplit(t *testing.T) {
 	_, _, _, _, ok := displayIdentityTuple("nonsense-display")
 	assert.False(t, ok)
 }
+
+func TestTrimDisplayZeros(t *testing.T) {
+	assert.Equal(t, "156", trimDisplayZeros("0156"))
+	assert.Equal(t, "0", trimDisplayZeros("000"))
+	assert.Equal(t, "0", trimDisplayZeros("0"))
+	assert.Equal(t, "28123", trimDisplayZeros("28123"))
+}
