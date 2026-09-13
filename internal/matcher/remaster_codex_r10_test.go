@@ -40,6 +40,7 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 		// Ordinary hyphen-number tags after a real separated remaster never
 		// suppress it, whatever the fallback matcher would pick instead.
 		{"ABC.123.HD FHD-1080.mkv", "ABC-123H"},
+		{"ABC.123.HD FHD-720.mkv", "ABC-123H"},
 		{"ABC.123.HD scene-2.mkv", "ABC-123H"},
 		// Plain forms are unchanged.
 		{"ABC.123.HD.mkv", "ABC-123H"},
