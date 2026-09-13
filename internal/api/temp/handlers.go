@@ -40,15 +40,6 @@ func serveTempPoster(rt *core.APIRuntime) gin.HandlerFunc {
 		jobID := c.Param("jobId")
 		filename := c.Param("filename")
 
-		// Validate both jobID and filename to prevent path traversal attacks.
-		// Reject "."/".." and any path separators — filepath.Base("..") == "..",
-		// so the prior base-name check alone let jobID=".." resolve posters/..
-		// to the temp root and serve sibling files.
-		if !isSafePathSegment(jobID) || !isSafePathSegment(filename) {
-			c.JSON(http.StatusNotFound, gin.H{errorResponseKey: notFoundMessage})
-			return
-		}
-
 		// Validate filename has .jpg extension
 		if !strings.HasSuffix(strings.ToLower(filename), ".jpg") {
 			c.JSON(http.StatusNotFound, gin.H{errorResponseKey: notFoundMessage})
@@ -66,12 +57,10 @@ func serveTempPoster(rt *core.APIRuntime) gin.HandlerFunc {
 			}
 		}
 
-		// Construct path and verify it's within tempPosterDir
-		tempPosterDir := filepath.Join(tempDir, "posters", jobID)
-		posterPath := filepath.Join(tempPosterDir, filename)
-
-		// Double-check the resolved path is still within tempPosterDir (defense in depth)
-		if rejectOutsideDir(c, tempPosterDir, posterPath) {
+		posterRoot := filepath.Join(tempDir, "posters")
+		posterPath, ok := resolvePosterPath(posterRoot, jobID, filename)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{errorResponseKey: notFoundMessage})
 			return
 		}
 
@@ -101,19 +90,15 @@ func serveCroppedPoster() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		filename := c.Param("filename")
 
-		// Validate filename to prevent path traversal attacks.
-		// Reject "."/".." and path separators in addition to requiring .jpg.
-		if !isSafePathSegment(filename) || !strings.HasSuffix(strings.ToLower(filename), ".jpg") {
+		if !strings.HasSuffix(strings.ToLower(filename), ".jpg") {
 			c.JSON(http.StatusNotFound, gin.H{errorResponseKey: notFoundMessage})
 			return
 		}
 
-		// Construct path and verify it's within posterDir
 		posterDir := filepath.Join("data", "posters")
-		posterPath := filepath.Join(posterDir, filename)
-
-		// Double-check the resolved path is still within posterDir (defense in depth)
-		if rejectOutsideDir(c, posterDir, posterPath) {
+		posterPath, ok := resolvePosterPath(posterDir, filename)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{errorResponseKey: notFoundMessage})
 			return
 		}
 
@@ -369,12 +354,15 @@ func resolveTempImageReferer(downloadURL, configuredReferer string) string {
 // not "." or "..", and containing no path separators (os.PathSeparator or '/').
 // filepath.Base alone is insufficient because filepath.Base("..") == "..",
 // which would let a jobID/filename of ".." escape its intended directory.
-func rejectOutsideDir(c *gin.Context, dir, path string) bool {
-	if pathWithinDir(dir, path) {
-		return false
+func resolvePosterPath(dir string, segments ...string) (string, bool) {
+	for _, segment := range segments {
+		if !isSafePathSegment(segment) {
+			return "", false
+		}
 	}
-	c.JSON(http.StatusNotFound, gin.H{errorResponseKey: notFoundMessage})
-	return true
+	parts := append([]string{dir}, segments...)
+	path := filepath.Join(parts...)
+	return path, pathWithinDir(dir, path)
 }
 
 func pathWithinDir(dir, path string) bool {

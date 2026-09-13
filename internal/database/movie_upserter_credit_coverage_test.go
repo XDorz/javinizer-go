@@ -28,6 +28,11 @@ func creditCoverageRepos(db *DB) (*CreditCollisionRepository, *ActressAliasRepos
 	return NewCreditCollisionRepository(db), NewActressAliasRepository(db)
 }
 
+func TestPR260CreditLabels(t *testing.T) {
+	require.Equal(t, "movie/7", movieCreditLabel(models.MovieCredit{MovieContentID: "movie", ActressID: 7}))
+	require.Equal(t, "9/field", creditCollisionLabel(models.CreditCollision{CreditID: 9, Field: "field"}))
+}
+
 func TestMovieUpserterCreditHelpers(t *testing.T) {
 	require.Equal(t, "First", scrapedFirstName(&models.MovieCredit{CreditedName: " Last  First "}))
 	require.Equal(t, "Last", scrapedLastName(&models.MovieCredit{CreditedName: " Last  First "}))

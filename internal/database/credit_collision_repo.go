@@ -17,13 +17,17 @@ type CreditCollisionRepository struct {
 	*BaseRepository[models.CreditCollision, uint]
 }
 
+func creditCollisionLabel(c models.CreditCollision) string {
+	return fmt.Sprintf("%d/%s", c.CreditID, c.Field)
+}
+
 // NewCreditCollisionRepository constructs a CreditCollisionRepository backed
 // by the given DB.
 func NewCreditCollisionRepository(db *DB) *CreditCollisionRepository {
 	return &CreditCollisionRepository{
 		BaseRepository: NewBaseRepository[models.CreditCollision, uint](
 			db, "credit collision",
-			func(c models.CreditCollision) string { return fmt.Sprintf("%d/%s", c.CreditID, c.Field) },
+			creditCollisionLabel,
 			WithNewEntity[models.CreditCollision, uint](func() models.CreditCollision { return models.CreditCollision{} }),
 		),
 	}

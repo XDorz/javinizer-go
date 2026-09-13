@@ -488,11 +488,11 @@ func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error
 	}
 	creditRepo := &MovieCreditRepository{BaseRepository: NewBaseRepository[models.MovieCredit, uint](
 		u.repo.GetDB(), "movie credit",
-		func(c models.MovieCredit) string { return fmt.Sprintf("%s/%d", c.MovieContentID, c.ActressID) },
+		movieCreditLabel,
 	)}
 	collisionRepo := &CreditCollisionRepository{BaseRepository: NewBaseRepository[models.CreditCollision, uint](
 		u.repo.GetDB(), "credit collision",
-		func(c models.CreditCollision) string { return fmt.Sprintf("%d/%s", c.CreditID, c.Field) },
+		creditCollisionLabel,
 	)}
 	aliasRepo := NewActressAliasRepository(u.repo.GetDB())
 

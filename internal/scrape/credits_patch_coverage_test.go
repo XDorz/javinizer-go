@@ -53,6 +53,12 @@ func TestAttachCreditPolicyPatchBranches(t *testing.T) {
 	assert.Equal(t, []string{"dmm"}, movie.TrustedCollisionSources)
 }
 
+func TestEnrichActressesSkipsCandidatePatchBranch(t *testing.T) {
+	movie := &models.Movie{Actresses: []models.Actress{{DMMID: 11}}}
+	repo := &mockActressRepoForUncovered{findByDMMIDVal: &models.Actress{DMMID: 11, Verified: false}}
+	assert.Zero(t, enrichActressesFromDB(t.Context(), movie, repo, &Config{ActressDBEnabled: true}))
+}
+
 func TestPostProcessScrapedBuildsCreditsPatchBranch(t *testing.T) {
 	movie := &models.Movie{ID: "PATCH-1", Actresses: []models.Actress{{FirstName: "Actor"}}}
 	result, err := postProcessScraped(t.Context(), movie, nil, nil, &Config{ScrapeActress: true, CollisionPolicy: "block"}, nil, nil, ScrapeCmd{MovieID: "PATCH-1"}, time.Now())

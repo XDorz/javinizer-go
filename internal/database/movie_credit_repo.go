@@ -15,13 +15,17 @@ type MovieCreditRepository struct {
 	*BaseRepository[models.MovieCredit, uint]
 }
 
+func movieCreditLabel(c models.MovieCredit) string {
+	return fmt.Sprintf("%s/%d", c.MovieContentID, c.ActressID)
+}
+
 // NewMovieCreditRepository constructs a repository backed by the given database handle.
 // NewMovieCreditRepository constructs a MovieCreditRepository backed by the given DB.
 func NewMovieCreditRepository(db *DB) *MovieCreditRepository {
 	return &MovieCreditRepository{
 		BaseRepository: NewBaseRepository[models.MovieCredit, uint](
 			db, "movie credit",
-			func(c models.MovieCredit) string { return fmt.Sprintf("%s/%d", c.MovieContentID, c.ActressID) },
+			movieCreditLabel,
 			WithNewEntity[models.MovieCredit, uint](func() models.MovieCredit { return models.MovieCredit{} }),
 		),
 	}
