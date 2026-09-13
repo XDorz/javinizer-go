@@ -400,7 +400,7 @@ func (s *scraper) resolveRemasterContentID(ctx context.Context, id, normalizedID
 }
 
 func (s *scraper) cacheContentID(ctx context.Context, searchID, contentID string) {
-	mapping := &models.ContentIDMapping{SearchID: searchID, ContentID: contentID, Source: "dmm"}
+	mapping := &models.ContentIDMapping{SearchID: searchID, ContentID: contentID, Source: s.Name()}
 	if err := s.contentIDRepo.Create(ctx, mapping); err != nil {
 		logging.Debugf("DMM: Failed to cache content-id mapping for %s: %v", searchID, err)
 	}

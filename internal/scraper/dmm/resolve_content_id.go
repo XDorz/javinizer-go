@@ -121,7 +121,7 @@ func (s *scraper) resolveContentIDCtx(ctx context.Context, id string) (string, e
 	mapping := &models.ContentIDMapping{
 		SearchID:  normalizedID,
 		ContentID: foundContentID,
-		Source:    "dmm",
+		Source:    s.Name(),
 	}
 
 	if err := s.contentIDRepo.Create(ctx, mapping); err != nil {
