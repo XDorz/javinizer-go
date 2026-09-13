@@ -481,6 +481,9 @@ func (u *MovieUpserter) ensureActressesExistTx(tx *gorm.DB, actresses []models.A
 }
 
 func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error {
+	if movie.SkipCreditReconcile {
+		return nil
+	}
 	policy := NormalizeCollisionPolicy(movie.CreditPolicy)
 	trusted := make(map[string]bool, len(movie.TrustedCollisionSources))
 	for _, s := range movie.TrustedCollisionSources {
@@ -499,9 +502,6 @@ func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error
 	existing, err := creditRepo.ListByMovieTx(tx, movie.ContentID)
 	if err != nil {
 		return err
-	}
-	if movie.SkipCreditReconcile {
-		existing = nil
 	}
 	openCollisions, err := collisionRepo.ListOpenByMovieTx(tx, movie.ContentID)
 	if err != nil {
