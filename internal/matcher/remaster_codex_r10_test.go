@@ -28,6 +28,9 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 		// Numbered quality tags (HDR10, HEVC10) are tags, not catalog ids.
 		{"ABC.123.HD HDR10.mkv", "ABC-123H"},
 		{"ABC.123.HD HEVC10.mkv", "ABC-123H"},
+		// Container/container-spelled quality tags (MP3, MP4) are tags too.
+		{"ABC.123.HD MP3.mkv", "ABC-123H"},
+		{"ABC.123.HD MP4.mkv", "ABC-123H"},
 		// Codec tags still stay ambiguous.
 		{"IPX-535-H.264.mkv", "IPX-535"},
 		{"IPX-535-H264.mkv", "IPX-535"},
