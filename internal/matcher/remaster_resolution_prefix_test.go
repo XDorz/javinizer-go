@@ -19,6 +19,8 @@ func TestContentIDCandidateResolutionPrefix(t *testing.T) {
 		{"1080p60 1rct00156h.mkv", "1RCT00156H", ""},
 		{"1920x1080 dv00899ai.mkv", "DV00899AI", ""},
 		{"1080p t28-123-hd.mkv", "T28-123H", "HD"},
+		{"1080p60 lulu00441.mkv", "LULU00441", ""},
+		{"1920x1080 abc00123.mkv", "ABC00123", ""},
 		{"1080p60.mkv", "", ""},
 		{"1080p60 birthday2024.mkv", "", ""},
 	} {
