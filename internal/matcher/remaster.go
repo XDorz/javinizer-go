@@ -32,6 +32,18 @@ func builtinStartsInsideContentID(s string, pattern *regexp.Regexp) bool {
 	return len(match) > 3 && match[2] > start && match[2] < end
 }
 
+// builtinQualityShadowsContentID reports whether the builtin-captured id is
+// itself nothing but a quality tag (x265, FHD720): such tags must never win
+// when a stronger raw content id appears elsewhere in the name.
+func builtinQualityShadowsContentID(name, id string) bool {
+	lower := strings.ToLower(id)
+	if trailingQualityTagRegex.FindString(lower) != lower {
+		return false
+	}
+	idText, _ := contentIDPrefixMatch(name)
+	return idText != ""
+}
+
 func normalizeFusedRemasterFilename(name string) string {
 	m := fusedRemasterRegex.FindStringSubmatchIndex(name)
 	fused := m != nil
@@ -46,7 +58,7 @@ func normalizeFusedRemasterFilename(name string) string {
 	remainder := remasterPartLabelRegex.ReplaceAllString(name[m[1]:], "")
 	// Compact codec/resolution tags (x265, FHD720) also match the trailing id
 	// alternatives; they are tags, not replacement ids, so veto the suppression.
-	if trailingCatalogIDRegex.MatchString(remainder) && !trailingQualityTagRegex.MatchString(remainder) {
+	if candidate := trailingCatalogIDRegex.FindString(remainder); candidate != "" && !trailingQualityTagRegex.MatchString(candidate) {
 		return normalizeFusedRemasterFilename(name[m[1]:])
 	}
 	// A prefix-free compact t28 tail with a three-digit number reads as the

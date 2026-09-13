@@ -111,7 +111,7 @@ func (m *Matcher) MatchFile(file models.FileMatchInfo) *MatchResult {
 	}
 
 	// Fall back to built-in pattern
-	if result := m.matchWithRegex(file, nameWithoutExt, m.builtinPattern, "builtin"); result != nil && !builtinStartsInsideContentID(nameWithoutExt, m.builtinPattern) {
+	if result := m.matchWithRegex(file, nameWithoutExt, m.builtinPattern, "builtin"); result != nil && !builtinStartsInsideContentID(nameWithoutExt, m.builtinPattern) && !builtinQualityShadowsContentID(nameWithoutExt, result.ID) {
 		return result
 	}
 
@@ -235,7 +235,7 @@ func (m *Matcher) MatchString(s string) string {
 
 	// Try built-in pattern
 	loc := m.builtinPattern.FindStringSubmatchIndex(s)
-	if loc != nil && !builtinStartsInsideContentID(s, m.builtinPattern) {
+	if loc != nil && !builtinStartsInsideContentID(s, m.builtinPattern) && !builtinQualityShadowsContentID(s, strings.ToUpper(s[loc[2]:loc[3]])) {
 		id := strings.ToUpper(s[loc[2]:loc[3]])
 		// The suffix comes after the actual match location: the id text may
 		// also occur earlier inside an ineligible token.
