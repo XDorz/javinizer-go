@@ -56,6 +56,14 @@ func contentIDCandidates(id string, markerAware bool) []string {
 			series, numStr = "t28", m[1]
 		}
 	}
+	return expandCandidates(direct, series, numStr, markerAware)
+}
+
+// expandCandidates renders the zero-padded, prefix-expanded candidate list for
+// an already-parsed (direct, series, number) triple. Callers that pinned the
+// separator boundary themselves use this directly so parsing never re-derives
+// a bound the display spelling already fixed.
+func expandCandidates(direct, series, numStr string, markerAware bool) []string {
 	series = strings.ToLower(series)
 	num, err := strconv.Atoi(numStr)
 	if err != nil {
@@ -116,6 +124,12 @@ var t28RemasterBaseRegex = regexp.MustCompile(`(?i)^t28(\d+)$`)
 
 var remasterMarkerTailRgx = regexp.MustCompile(`(?i)^(.*\d)([ez]?)(hd|ai|h)$`)
 
+// tDisplayRemasterRegex captures a separator-pinned display spelling of the
+// form <series><sep><digits><marker>: the separator pins the series boundary
+// ("t-28123-hd" => series t, number 28123), which the compacted candidate
+// shape would otherwise collapse into t28/123.
+var tDisplayRemasterRegex = regexp.MustCompile(`^(.*?)[-_.\s](\d+)[ez]?[-_.\s]*(?:hd|ai|h)$`)
+
 // ContentIDCandidatesWithMarker is ContentIDCandidates for marker-bearing
 // inputs: the trailing H/HD/AI marker is split off, base candidates are built
 // from the core id, and the folded marker (hd -> h) is re-appended to every
@@ -126,8 +140,13 @@ func ContentIDCandidatesWithMarker(id string) []string {
 		return []string{raw}
 	}
 	// Normalize display separators first: advertised spellings (RCT-156-HD,
-	// DV-818-AI, RCT-156 HD) place a separator between number and marker.
-	compacted := strings.NewReplacer("-", "", "_", "", ".", "", " ", "").Replace(strings.TrimSpace(id))
+	// DV-818-AI, RCT-156 HD) place a separator between number and marker. The
+	// compacted shape collapses separator-pinned boundaries (T-28123-HD and
+	// T28-123-HD both compact to t28123hd), so when the input carries
+	// separators keep them in the split source and let the display pinning win.
+	hasSeparator := strings.ContainsAny(id, "-_. ")
+	trimmedLower := strings.ToLower(strings.TrimSpace(id))
+	compacted := strings.NewReplacer("-", "", "_", "", ".", "", " ", "").Replace(trimmedLower)
 	m := remasterMarkerTailRgx.FindStringSubmatch(compacted)
 	if m == nil {
 		return ContentIDCandidates(id)
@@ -137,11 +156,23 @@ func ContentIDCandidatesWithMarker(id string) []string {
 	// Only display spellings fold HD to H; separator evidence in the original
 	// input forces display semantics even when the compacted shape looks like
 	// a zero-padded content id (RCT-00156-HD vs raw rct00156hd).
-	hasSeparator := strings.ContainsAny(id, "-_. ")
 	if marker == "hd" && (hasSeparator || (!looksLikeContentID(strings.ToLower(compacted)) && !zeroPaddedCIDRegex.MatchString(strings.ToLower(compacted)))) {
 		marker = "h"
 	}
-	base := contentIDCandidates(m[1], true)
+	baseInput := m[1]
+	var base []string
+	if hasSeparator {
+		// A display spelling like T-28123-HD pins its own series boundary
+		// ("t"/28123) that compaction erases; re-derive it from the separated
+		// tail and expand directly so the T-series prefixes (55t28123h, ...)
+		// are generated instead of the t28-series set.
+		if ts := tDisplayRemasterRegex.FindStringSubmatch(trimmedLower); ts != nil {
+			base = expandCandidates(m[1], ts[1], ts[2], true)
+		}
+	}
+	if base == nil {
+		base = contentIDCandidates(baseInput, true)
+	}
 	out := make([]string, 0, len(base)+1)
 	if !hasSeparator && zeroPaddedCIDRegex.MatchString(raw) {
 		out = append(out, raw)

@@ -34,6 +34,9 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 		// Numbered Dolby audio tags (DDP5.1, EAC3) are tags too.
 		{"ABC.123.HD DDP5.1.mkv", "ABC-123H"},
 		{"ABC.123.HD EAC3.mkv", "ABC-123H"},
+		// DivX/Xvid numbered tags are tags too.
+		{"ABC.123.HD DIVX5.mkv", "ABC-123H"},
+		{"ABC.123.HD XVID4.mkv", "ABC-123H"},
 		// MPEG-2 and VPx codec tags are tags too.
 		{"ABC.123.HD MPEG2.mkv", "ABC-123H"},
 		{"ABC.123.HD VP9.mkv", "ABC-123H"},
