@@ -21,6 +21,7 @@ var (
 	rawTokenRegex           = regexp.MustCompile(`[A-Za-z0-9]+`)
 	strongRawTokenRegex     = regexp.MustCompile(`(?i)^(?:\d+(?:t28|[A-Za-z]+)\d+[A-Za-z]{0,3}|(?:t28|[A-Za-z]+)\d{4,5}[ez]?(?:hd|ai|h))$`)
 	zeroPaddedRawTokenRegex = regexp.MustCompile(`(?i)^(?:t28|[a-z]+)0\d{3,4}[a-z]{0,3}$`)
+	weakWordYearRegex       = regexp.MustCompile(`(?i)^[a-z]+\d{4,5}$`)
 )
 
 func builtinMatchConflictsWithContentID(s string, pattern *regexp.Regexp) bool {
@@ -121,8 +122,9 @@ func foldRemasterMarker(spelling string) string {
 // captured id text and the post-id remainder (which may carry part suffixes).
 // contentIDCandidate locates the raw content id the name should resolve to.
 // The leftmost shape match wins unless it is a weak prefixless form without a
-// marker tail (a word plus a year, e.g. birthday2024), in which case a
-// numeric-prefixed or marker-bearing raw id later in the name outranks it.
+// marker tail (a word plus a year, e.g. birthday2024). Weak forms are only
+// accepted when a numeric-prefixed or marker-bearing raw id later in the name
+// corroborates them.
 func contentIDCandidate(s string) (start, end int, ok bool) {
 	m := contentIDShapeRegex.FindStringSubmatchIndex(s)
 	if m == nil {
@@ -152,6 +154,9 @@ func contentIDCandidate(s string) (start, end int, ok bool) {
 			continue
 		}
 		return loc[0], loc[1], true
+	}
+	if weakWordYearRegex.MatchString(id) {
+		return 0, 0, false
 	}
 	return m[2], m[3], true
 }
