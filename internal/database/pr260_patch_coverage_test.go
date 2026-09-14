@@ -336,6 +336,55 @@ func TestPR260CollisionServiceMutationErrors(t *testing.T) {
 		injectDatabaseCallbackError(t, db, "query", "movie_credits", 1)
 		require.Error(t, service.SetCreditSuppressed(context.Background(), credit.ID, false))
 	})
+	t.Run("suppressed legacy association delete", func(t *testing.T) {
+		db, service, credit, _ := collisionFixture(t)
+		movie := models.Movie{ContentID: credit.MovieContentID}
+		require.NoError(t, db.Model(&movie).Association("Actresses").Replace([]models.Actress{{ID: credit.ActressID}}))
+		require.NoError(t, db.Exec("CREATE TRIGGER pr260_fail_suppressed_legacy_delete BEFORE DELETE ON movie_actresses BEGIN SELECT RAISE(ABORT, 'injected database error'); END").Error)
+		require.Error(t, service.SetCreditSuppressed(context.Background(), credit.ID, true))
+	})
+	t.Run("unsuppressed legacy association insert", func(t *testing.T) {
+		db, service, credit, _ := collisionFixture(t)
+		require.NoError(t, db.Exec("CREATE TRIGGER pr260_fail_unsuppressed_legacy_insert BEFORE INSERT ON movie_actresses BEGIN SELECT RAISE(ABORT, 'injected database error'); END").Error)
+		require.Error(t, service.SetCreditSuppressed(context.Background(), credit.ID, false))
+	})
+}
+
+func TestPR260CreditReassignmentPersistenceErrors(t *testing.T) {
+	t.Run("mapping update", func(t *testing.T) {
+		db, _, credit, _ := collisionFixture(t)
+		target := models.Actress{FirstName: "Target", Verified: true}
+		require.NoError(t, db.Create(&target).Error)
+		require.NoError(t, db.Migrator().DropTable(&models.MovieCreditReassignment{}))
+		require.Error(t, reassignCreditTx(db.DB, &credit, target.ID))
+	})
+	t.Run("mapping insert", func(t *testing.T) {
+		db, _, credit, _ := collisionFixture(t)
+		target := models.Actress{FirstName: "Target", Verified: true}
+		require.NoError(t, db.Create(&target).Error)
+		require.NoError(t, db.Exec("CREATE TRIGGER fail_credit_reassignment_insert BEFORE INSERT ON movie_credit_reassignments BEGIN SELECT RAISE(ABORT, 'injected database error'); END").Error)
+		require.Error(t, reassignCreditTx(db.DB, &credit, target.ID))
+	})
+	t.Run("mapping target lookup", func(t *testing.T) {
+		db := newCreditTestDB(t)
+		u := creditCoverageUpserter(db)
+		movie := creditCoverageMovie(t, db, "credit-reassignment-target")
+		source := models.Actress{FirstName: "Source", Verified: true}
+		target := models.Actress{FirstName: "Candidate", Verified: false}
+		require.NoError(t, db.Create(&source).Error)
+		require.NoError(t, db.Create(&target).Error)
+		require.NoError(t, db.Create(&models.MovieCreditReassignment{MovieContentID: movie.ContentID, SourceActressID: source.ID, TargetActressID: target.ID}).Error)
+		movie.Credits = []models.MovieCredit{{CreditedName: source.FullName(), Scraped: source}}
+		require.Error(t, u.persistCreditsTx(db.DB, movie))
+	})
+}
+
+func TestPersistCreditsTxReassignmentQueryError(t *testing.T) {
+	db := newCreditTestDB(t)
+	u := creditCoverageUpserter(db)
+	movie := creditCoverageMovie(t, db, "credit-reassignment-query")
+	require.NoError(t, db.Migrator().DropTable(&models.MovieCreditReassignment{}))
+	require.Error(t, u.persistCreditsTx(db.DB, movie))
 }
 
 func TestPR260CollisionHelpersErrors(t *testing.T) {

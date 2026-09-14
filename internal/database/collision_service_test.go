@@ -25,7 +25,8 @@ func collisionFixture(t *testing.T) (*DB, *CollisionService, models.MovieCredit,
 func TestCollisionServiceReassignSynchronizesLegacyActressAssociation(t *testing.T) {
 	t.Run("direct", func(t *testing.T) {
 		db, service, credit, collision := collisionFixture(t)
-		target := models.Actress{FirstName: "Target", Verified: true, Origin: ActressOriginUser}
+		sourceActressID := credit.ActressID
+		target := models.Actress{FirstName: "Person", LastName: "Reported", Verified: true, Origin: ActressOriginUser}
 		require.NoError(t, db.Create(&target).Error)
 		movie := models.Movie{ContentID: credit.MovieContentID}
 		require.NoError(t, db.Model(&movie).Association("Actresses").Replace([]models.Actress{{ID: credit.ActressID}}))
@@ -38,6 +39,20 @@ func TestCollisionServiceReassignSynchronizesLegacyActressAssociation(t *testing
 		require.ElementsMatch(t, []uint{target.ID}, ids)
 		require.NoError(t, db.First(&credit, credit.ID).Error)
 		require.Equal(t, target.ID, credit.ActressID)
+
+		rescrape := creditMovie(credit.MovieContentID, []models.MovieCredit{{
+			CreditedName: collision.ReportedValue,
+			Scraped:      models.Actress{FirstName: "Truth", LastName: "Original"},
+		}})
+		_, err = db.Repositories().MovieRepo.UpsertWithTranslations(context.Background(), rescrape, nil, nil)
+		require.NoError(t, err)
+		credits, err := service.Credits.ListByMovie(context.Background(), credit.MovieContentID)
+		require.NoError(t, err)
+		require.Len(t, credits, 1)
+		require.Equal(t, target.ID, credits[0].ActressID)
+		var reassignment models.MovieCreditReassignment
+		require.NoError(t, db.First(&reassignment, "movie_content_id = ? AND source_actress_id = ?", credit.MovieContentID, sourceActressID).Error)
+		require.Equal(t, target.ID, reassignment.TargetActressID)
 	})
 
 	t.Run("merge", func(t *testing.T) {
@@ -238,6 +253,8 @@ func TestCollisionServiceInvalidResolutionRollsBack(t *testing.T) {
 func TestCollisionServiceOverrideAndSuppression(t *testing.T) {
 	db, service, credit, collision := collisionFixture(t)
 	ctx := context.Background()
+	legacyMovie := models.Movie{ContentID: credit.MovieContentID}
+	require.NoError(t, db.Model(&legacyMovie).Association("Actresses").Replace([]models.Actress{{ID: credit.ActressID}}))
 	require.ErrorIs(t, service.UpdateCreditOverride(ctx, 9999, "Missing", true), ErrNotFound)
 	require.ErrorIs(t, service.SetCreditSuppressed(ctx, 9999, true), ErrNotFound)
 	require.NoError(t, service.UpdateCreditOverride(ctx, credit.ID, "User Name", true))
@@ -246,10 +263,16 @@ func TestCollisionServiceOverrideAndSuppression(t *testing.T) {
 	require.True(t, credit.UserOverride)
 	require.Equal(t, "user", credit.Origin)
 	require.NoError(t, service.SetCreditSuppressed(ctx, credit.ID, true))
+	var ids []uint
+	require.NoError(t, db.Table("movie_actresses").Where("movie_content_id = ?", credit.MovieContentID).Pluck("actress_id", &ids).Error)
+	require.Empty(t, ids)
 	require.NoError(t, db.First(&collision, collision.ID).Error)
 	require.Equal(t, models.CollisionResolutionByRemoval, collision.Resolution)
 	require.Equal(t, models.CollisionStatusResolved, collision.Status)
 	require.NoError(t, service.SetCreditSuppressed(ctx, credit.ID, false))
+	ids = nil
+	require.NoError(t, db.Table("movie_actresses").Where("movie_content_id = ?", credit.MovieContentID).Pluck("actress_id", &ids).Error)
+	require.ElementsMatch(t, []uint{credit.ActressID}, ids)
 	require.NoError(t, db.First(&collision, collision.ID).Error)
 	require.Equal(t, models.CollisionStatusOpen, collision.Status)
 	require.Empty(t, collision.Resolution)

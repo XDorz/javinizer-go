@@ -260,13 +260,26 @@ func setCreditSuppressedTx(tx *gorm.DB, creditID uint, suppressed bool) error {
 	if err := collisionQuery.Updates(collisionUpdates).Error; err != nil {
 		return err
 	}
-	var contentID string
-	if err := tx.Model(&models.MovieCredit{}).Where("id = ?", creditID).Pluck("movie_content_id", &contentID).Error; err != nil {
+	var credit models.MovieCredit
+	if err := tx.Model(&models.MovieCredit{}).Select("movie_content_id", "actress_id").Where("id = ?", creditID).First(&credit).Error; err != nil {
+		return err
+	}
+	if suppressed {
+		if err := tx.Exec(
+			"DELETE FROM movie_actresses WHERE movie_content_id = ? AND actress_id = ?",
+			credit.MovieContentID, credit.ActressID,
+		).Error; err != nil {
+			return err
+		}
+	} else if err := tx.Exec(
+		"INSERT OR IGNORE INTO movie_actresses (movie_content_id, actress_id) VALUES (?, ?)",
+		credit.MovieContentID, credit.ActressID,
+	).Error; err != nil {
 		return err
 	}
 	return tx.Exec(
 		"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id = ?",
-		contentID,
+		credit.MovieContentID,
 	).Error
 }
 
@@ -380,6 +393,9 @@ func reassignCreditTx(tx *gorm.DB, credit *models.MovieCredit, targetActressID u
 			return fmt.Errorf("reassign credit: target actress %d: %w", targetActressID, ErrNotFound)
 		}
 		return wrapDBErr("find", fmt.Sprintf("target actress %d", targetActressID), err)
+	}
+	if err := recordCreditReassignmentTx(tx, credit.MovieContentID, credit.ActressID, targetActressID); err != nil {
+		return err
 	}
 	var targetCredit models.MovieCredit
 	err := tx.Model(&models.MovieCredit{}).

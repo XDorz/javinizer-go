@@ -65,6 +65,31 @@ func TestCreditRepositoriesLifecycle(t *testing.T) {
 	require.Zero(t, count)
 }
 
+func TestRecordTxReopensAutomaticallyRemovedCollision(t *testing.T) {
+	db, service, credit, collision := collisionFixture(t)
+	collision.Status = models.CollisionStatusResolved
+	collision.Resolution = models.CollisionResolutionByRemoval
+	require.NoError(t, db.Save(&collision).Error)
+	incoming := models.CreditCollision{
+		CreditID:       credit.ID,
+		MovieContentID: credit.MovieContentID,
+		Field:          collision.Field,
+		ReportedValue:  collision.ReportedValue,
+		CanonicalValue: collision.CanonicalValue,
+	}
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error { return service.Collisions.RecordTx(tx, &incoming, "javdb") }))
+	require.Equal(t, models.CollisionStatusOpen, incoming.Status)
+	require.Empty(t, incoming.Resolution)
+	require.Equal(t, 2, incoming.Occurrences)
+
+	incoming.Status = models.CollisionStatusResolved
+	incoming.Resolution = models.CollisionResolutionKeepIdentity
+	require.NoError(t, db.Save(&incoming).Error)
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error { return service.Collisions.RecordTx(tx, &incoming, "dmm") }))
+	require.Equal(t, models.CollisionStatusResolved, incoming.Status)
+	require.Equal(t, models.CollisionResolutionKeepIdentity, incoming.Resolution)
+}
+
 func TestCreditRepositoriesCancellationErrors(t *testing.T) {
 	db, service, credit, collision := collisionFixture(t)
 	ctx, cancel := context.WithCancel(context.Background())

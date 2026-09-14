@@ -565,6 +565,10 @@ func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error
 	if err != nil {
 		return err
 	}
+	reassignments, err := loadCreditReassignmentsTx(tx, movie.ContentID)
+	if err != nil {
+		return err
+	}
 	existingByActress := make(map[uint]models.MovieCredit, len(existing))
 	for _, ex := range existing {
 		existingByActress[ex.ActressID] = ex
@@ -601,7 +605,19 @@ func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error
 		if err != nil {
 			return err
 		}
+		sourceActressID := resolved.ID
+		if targetActressID, ok := reassignments[sourceActressID]; ok && targetActressID != sourceActressID {
+			var target models.Actress
+			if err := tx.Where("id = ? AND verified = ?", targetActressID, true).First(&target).Error; err != nil {
+				return err
+			}
+			resolved = &target
+			outcome = ResolutionMatched
+		}
 		credit.ActressID = resolved.ID
+		if ex, ok := existingByActress[credit.ActressID]; ok && ex.OrderPinned {
+			credit.OrderIndex = ex.OrderIndex
+		}
 		resolvedById[resolved.ID] = *resolved
 
 		if err := creditRepo.UpsertTx(tx, credit); err != nil {

@@ -30,6 +30,7 @@ func TestMovieCreditDisplayAndOwnership(t *testing.T) {
 		require.Equal(t, tc.owned, tc.credit.IsScrapeOwned())
 	}
 	require.Equal(t, "movie_credits", (MovieCredit{}).TableName())
+	require.Equal(t, "movie_credit_reassignments", (MovieCreditReassignment{}).TableName())
 }
 func TestCreditCollisionSources(t *testing.T) {
 	c := CreditCollision{Status: CollisionStatusOpen}

@@ -48,13 +48,20 @@ func (r *CreditCollisionRepository) RecordTx(tx *gorm.DB, collision *models.Cred
 		if collision.CanonicalValue != "" {
 			existing.CanonicalValue = collision.CanonicalValue
 		}
-		if err := tx.Model(&models.CreditCollision{}).Where("id = ?", existing.ID).Updates(map[string]interface{}{
+		updates := map[string]interface{}{
 			"occurrences":     existing.Occurrences,
 			"sources_seen":    existing.SourcesSeen,
 			"last_seen_at":    existing.LastSeenAt,
 			"canonical_value": existing.CanonicalValue,
 			colUpdatedAt:      time.Now().UTC(),
-		}).Error; err != nil {
+		}
+		if existing.Status == models.CollisionStatusResolved && existing.Resolution == models.CollisionResolutionByRemoval {
+			existing.Status = models.CollisionStatusOpen
+			existing.Resolution = ""
+			updates[colStatus] = models.CollisionStatusOpen
+			updates[colResolution] = ""
+		}
+		if err := tx.Model(&models.CreditCollision{}).Where("id = ?", existing.ID).Updates(updates).Error; err != nil {
 			return wrapDBErr("update collision", fmt.Sprintf("collision %d", existing.ID), err)
 		}
 		*collision = existing

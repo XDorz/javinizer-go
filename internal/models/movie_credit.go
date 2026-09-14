@@ -100,6 +100,21 @@ func (c *MovieCredit) DisplayName(actress *Actress) string {
 	return actress.FullName()
 }
 
+// MovieCreditReassignment records a user-selected source-to-target credit link.
+type MovieCreditReassignment struct {
+	ID              uint      `json:"id" gorm:"primaryKey"`
+	MovieContentID  string    `json:"movie_content_id" gorm:"not null;uniqueIndex:idx_movie_credit_reassignments_source"`
+	SourceActressID uint      `json:"source_actress_id" gorm:"not null;uniqueIndex:idx_movie_credit_reassignments_source"`
+	TargetActressID uint      `json:"target_actress_id" gorm:"not null"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+// TableName returns the reassignment table name.
+func (MovieCreditReassignment) TableName() string {
+	return "movie_credit_reassignments"
+}
+
 // CreditCollision implements the credit identity lifecycle contract.
 type CreditCollision struct {
 	ID             uint      `json:"id" gorm:"primaryKey"`
