@@ -215,6 +215,22 @@ func TestFindDMMCandidateByExactNameQueryError(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestFindImportMatchDMMCandidateLookupError(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := NewActressRepository(db)
+	injectDatabaseCallbackError(t, db, "query", "actresses", 3)
+	_, err := repo.findImportMatch(context.Background(), &models.Actress{FirstName: "Name", LastName: "Candidate"})
+	require.Error(t, err)
+}
+
+func TestFindImportMatchWithoutName(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := NewActressRepository(db)
+	found, err := repo.findImportMatch(context.Background(), &models.Actress{})
+	require.NoError(t, err)
+	require.Nil(t, found)
+}
+
 func TestExactActressNamesMatch(t *testing.T) {
 	tests := []struct {
 		name  string

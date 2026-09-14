@@ -230,6 +230,13 @@ func TestRetargetActressAliasesUpdateError(t *testing.T) {
 	require.Error(t, retargetActressAliasesTx(db.DB, credit.ActressID, "Original Truth"))
 }
 
+func TestCollisionServiceAliasRetargetErrorRollsBack(t *testing.T) {
+	db, service, _, collision := collisionFixture(t)
+	require.NoError(t, db.DB.Exec("DROP TABLE actress_aliases").Error)
+	_, err := service.Resolve(context.Background(), collision.ID, models.CollisionResolutionAdoptCanonical, 0)
+	require.Error(t, err)
+}
+
 func TestCollisionServiceAdoptCanonicalReconciliationErrorRollsBack(t *testing.T) {
 	db, service, credit, collision := collisionFixture(t)
 	siblingMovie := models.Movie{ContentID: "sibling-reconcile-error", ID: "sibling-reconcile-error"}
