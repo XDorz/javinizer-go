@@ -292,9 +292,6 @@ func (g *Generator) resolveCreditDisplayName(credit models.MovieCredit) string {
 	if !credit.DisplayForceCanonical && g.config.UseCreditedName && strings.TrimSpace(credit.CreditedName) != "" {
 		return strings.TrimSpace(credit.CreditedName)
 	}
-	if actress != nil && !actress.Verified && strings.TrimSpace(credit.CreditedName) != "" {
-		return strings.TrimSpace(credit.CreditedName)
-	}
 	if actress != nil {
 		return g.formatActressName(*actress)
 	}
@@ -316,8 +313,10 @@ func (g *Generator) buildActorsFromCredits(credits []models.MovieCredit) []actor
 		if credit.Suppressed {
 			continue
 		}
-		if credit.Actress != nil && !credit.Actress.Verified {
-			continue
+		if credit.Actress != nil {
+			if !credit.Actress.Verified {
+				continue
+			}
 		}
 		name := g.resolveCreditDisplayName(credit)
 		if strings.TrimSpace(name) == "" {
