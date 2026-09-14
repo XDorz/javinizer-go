@@ -78,9 +78,6 @@ func (u *MovieUpserter) UpsertWithTranslations(ctx context.Context, movie *model
 				if err := u.insertOrHandleDuplicateTx(tx, movie, &result); err != nil {
 					return err
 				}
-				if result != nil {
-					return nil // duplicate-key path already loaded result
-				}
 			}
 
 			// Step 3: Upsert genres (ensure genre records exist before association)

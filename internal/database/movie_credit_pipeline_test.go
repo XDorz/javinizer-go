@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 )
@@ -45,6 +46,45 @@ func TestUpsertWithCredits_CreatesCandidateAndCredit(t *testing.T) {
 
 	_, err = repo.ActressRepo.FindByID(context.Background(), saved.Credits[0].ActressID)
 	require.NoError(t, err)
+}
+
+func TestUpsertWithCredits_DuplicateMovieRecoveryReconcilesCredits(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := db.Repositories()
+	actress := models.Actress{DMMID: 777001, LastName: "Hatano", FirstName: "Yui", Verified: true, Origin: "user"}
+	require.NoError(t, repo.ActressRepo.Create(context.Background(), &actress))
+
+	const movieID = "duplicate-credit-recovery"
+	callbackName := "test:inject_movie_duplicate_credit_recovery"
+	injected := false
+	require.NoError(t, db.DB.Callback().Create().Before("gorm:create").Register(callbackName, func(tx *gorm.DB) {
+		if injected || tx.Statement == nil || tx.Statement.Schema == nil || tx.Statement.Schema.Table != "movies" {
+			return
+		}
+		dest, ok := tx.Statement.Dest.(*models.Movie)
+		if !ok || dest.ContentID != movieID {
+			return
+		}
+		injected = true
+		_ = tx.AddError(gorm.ErrDuplicatedKey)
+	}))
+	t.Cleanup(func() { _ = db.DB.Callback().Create().Remove(callbackName) })
+
+	movie := creditMovie(movieID, []models.MovieCredit{{
+		CreditedName: "Hatano Yui",
+		Scraped:      models.Actress{DMMID: actress.DMMID, LastName: "Hatano", FirstName: "Yui"},
+	}})
+	saved, err := repo.MovieRepo.UpsertWithTranslations(context.Background(), movie, nil, nil)
+	require.NoError(t, err)
+	require.True(t, injected)
+	require.Len(t, saved.Credits, 1)
+	require.Equal(t, actress.ID, saved.Credits[0].ActressID)
+	require.NotNil(t, saved.Credits[0].Actress)
+
+	credits, err := repo.MovieCreditRepo.ListByMovie(context.Background(), movieID)
+	require.NoError(t, err)
+	require.Len(t, credits, 1)
+	require.Equal(t, actress.ID, credits[0].ActressID)
 }
 
 func TestUpsertWithCredits_DMMIDMatchLeavesIdentityUnchanged(t *testing.T) {

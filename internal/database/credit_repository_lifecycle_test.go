@@ -131,6 +131,31 @@ func TestImportUpsertPromotesDMMlessCandidateByNameKey(t *testing.T) {
 	require.Equal(t, ActressOriginImport, stored.Origin)
 }
 
+func TestImportUpsertPromotesDMMlessCandidateWithDMMID(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := NewActressRepository(db)
+	candidate := models.Actress{
+		FirstName: "NameOnly",
+		LastName:  "DMMCandidate",
+		Verified:  false,
+		Origin:    ActressOriginScrape,
+		NameKey:   models.NormalizeActressNameKey("DMMCandidate NameOnly"),
+	}
+	require.NoError(t, repo.Create(context.Background(), &candidate))
+
+	incoming := models.Actress{DMMID: 987654, FirstName: "NameOnly", LastName: "DMMCandidate"}
+	require.NoError(t, repo.ImportUpsert(context.Background(), &incoming))
+	require.Equal(t, candidate.ID, incoming.ID)
+	require.Equal(t, 987654, incoming.DMMID)
+	require.True(t, incoming.Verified)
+	require.Equal(t, ActressOriginImport, incoming.Origin)
+
+	stored, err := repo.FindByID(context.Background(), candidate.ID)
+	require.NoError(t, err)
+	require.Equal(t, 987654, stored.DMMID)
+	require.True(t, stored.Verified)
+}
+
 func TestImportUpsertCandidateLookupError(t *testing.T) {
 	db := newCreditTestDB(t)
 	repo := NewActressRepository(db)

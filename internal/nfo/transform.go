@@ -316,6 +316,9 @@ func (g *Generator) buildActorsFromCredits(credits []models.MovieCredit) []actor
 		if credit.Suppressed {
 			continue
 		}
+		if credit.Actress != nil && !credit.Actress.Verified {
+			continue
+		}
 		name := g.resolveCreditDisplayName(credit)
 		if strings.TrimSpace(name) == "" {
 			continue

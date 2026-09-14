@@ -90,6 +90,5 @@ func TestBuildActorsFromCreditsPatchBranches(t *testing.T) {
 	actors := g.buildActorsFromCredits(credits)
 	assert.Equal(t, []actor{
 		{Name: "Hatano Yui", Role: "波多野結衣", Thumb: "https://example.com/yui.jpg"},
-		{Name: "Aoi", Role: "葵", Order: 1},
 	}, actors)
 }
