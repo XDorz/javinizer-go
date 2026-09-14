@@ -156,6 +156,88 @@ func TestImportUpsertPromotesDMMlessCandidateByNameKey(t *testing.T) {
 	require.Equal(t, ActressOriginImport, stored.Origin)
 }
 
+func TestImportUpsertMatchesDMMBackedCandidateByUniqueName(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := NewActressRepository(db)
+	candidate := models.Actress{
+		DMMID:     987650,
+		FirstName: "NameOnly",
+		LastName:  "DMMCandidate",
+		Verified:  false,
+		Origin:    ActressOriginScrape,
+	}
+	require.NoError(t, repo.Create(context.Background(), &candidate))
+	movie := models.Movie{ContentID: "dmm-candidate-import", ID: "dmm-candidate-import"}
+	require.NoError(t, db.Create(&movie).Error)
+	credit := models.MovieCredit{MovieContentID: movie.ContentID, ActressID: candidate.ID}
+	require.NoError(t, db.Create(&credit).Error)
+
+	incoming := models.Actress{FirstName: "NameOnly", LastName: "DMMCandidate"}
+	require.NoError(t, repo.ImportUpsert(context.Background(), &incoming))
+	require.Equal(t, candidate.ID, incoming.ID)
+	require.Equal(t, candidate.DMMID, incoming.DMMID)
+	require.True(t, incoming.Verified)
+
+	var storedCredit models.MovieCredit
+	require.NoError(t, db.First(&storedCredit, credit.ID).Error)
+	require.Equal(t, candidate.ID, storedCredit.ActressID)
+}
+
+func TestImportUpsertLeavesAmbiguousDMMBackedCandidatesUnmatched(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := NewActressRepository(db)
+	for _, dmmID := range []int{987651, 987652} {
+		candidate := models.Actress{
+			DMMID:     dmmID,
+			FirstName: "Same",
+			LastName:  "Candidate",
+			Verified:  false,
+			Origin:    ActressOriginScrape,
+		}
+		require.NoError(t, repo.Create(context.Background(), &candidate))
+	}
+
+	incoming := models.Actress{FirstName: "Same", LastName: "Candidate"}
+	require.NoError(t, repo.ImportUpsert(context.Background(), &incoming))
+	require.NotEqual(t, 0, incoming.ID)
+	require.NotEqual(t, 987651, incoming.DMMID)
+	require.True(t, incoming.Verified)
+	var count int64
+	require.NoError(t, db.Model(&models.Actress{}).Where("verified = ?", true).Count(&count).Error)
+	require.EqualValues(t, 1, count)
+}
+
+func TestFindDMMCandidateByExactNameQueryError(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := NewActressRepository(db)
+	injectDatabaseCallbackError(t, db, "query", "actresses", 1)
+	_, err := repo.findDMMCandidateByExactName(context.Background(), &models.Actress{FirstName: "Name", LastName: "Candidate"})
+	require.Error(t, err)
+}
+
+func TestExactActressNamesMatch(t *testing.T) {
+	tests := []struct {
+		name  string
+		left  *models.Actress
+		right *models.Actress
+		want  bool
+	}{
+		{"nil left", nil, &models.Actress{}, false},
+		{"nil right", &models.Actress{}, nil, false},
+		{"japanese", &models.Actress{JapaneseName: "名前"}, &models.Actress{JapaneseName: " 名前 "}, true},
+		{"western", &models.Actress{FirstName: "Name", LastName: "Candidate"}, &models.Actress{FirstName: "Name", LastName: "Candidate"}, true},
+		{"western mismatch", &models.Actress{FirstName: "Name", LastName: "Candidate"}, &models.Actress{FirstName: "Other", LastName: "Candidate"}, false},
+		{"first only", &models.Actress{FirstName: "Name"}, &models.Actress{FirstName: "Name"}, true},
+		{"last only", &models.Actress{LastName: "Candidate"}, &models.Actress{LastName: "Candidate"}, true},
+		{"empty", &models.Actress{}, &models.Actress{}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, exactActressNamesMatch(tt.left, tt.right))
+		})
+	}
+}
+
 func TestImportUpsertPromotesDMMlessCandidateWithDMMID(t *testing.T) {
 	db := newCreditTestDB(t)
 	repo := NewActressRepository(db)

@@ -201,6 +201,35 @@ func TestCollisionServiceAdoptCanonicalReconcilesSiblingCollisions(t *testing.T)
 	}
 }
 
+func TestCollisionServiceAdoptCanonicalRetargetsAliases(t *testing.T) {
+	db, service, credit, collision := collisionFixture(t)
+	alias := models.ActressAlias{AliasName: "Legacy Name", CanonicalName: "Original Truth"}
+	require.NoError(t, db.Create(&alias).Error)
+
+	_, err := service.Resolve(context.Background(), collision.ID, models.CollisionResolutionAdoptCanonical, 0)
+	require.NoError(t, err)
+	require.NoError(t, db.First(&alias, alias.ID).Error)
+	require.Equal(t, "Reported Person", alias.CanonicalName)
+	found, err := service.Actresses.FindVerifiedByAlias(context.Background(), "Legacy Name")
+	require.NoError(t, err)
+	require.Equal(t, credit.ActressID, found.ID)
+}
+
+func TestRetargetActressAliasesEarlyReturns(t *testing.T) {
+	db, _, credit, _ := collisionFixture(t)
+	require.NoError(t, retargetActressAliasesTx(db.DB, credit.ActressID, ""))
+	require.NoError(t, retargetActressAliasesTx(db.DB, credit.ActressID, "Original Truth"))
+	require.Error(t, retargetActressAliasesTx(db.DB, credit.ActressID+100, "Original Truth"))
+}
+
+func TestRetargetActressAliasesUpdateError(t *testing.T) {
+	db, _, credit, _ := collisionFixture(t)
+	require.NoError(t, db.Create(&models.ActressAlias{AliasName: "Legacy Name", CanonicalName: "Original Truth"}).Error)
+	require.NoError(t, db.Model(&models.Actress{}).Where("id = ?", credit.ActressID).Update("first_name", "Changed").Error)
+	require.NoError(t, db.DB.Exec("DROP TABLE actress_aliases").Error)
+	require.Error(t, retargetActressAliasesTx(db.DB, credit.ActressID, "Original Truth"))
+}
+
 func TestCollisionServiceAdoptCanonicalReconciliationErrorRollsBack(t *testing.T) {
 	db, service, credit, collision := collisionFixture(t)
 	siblingMovie := models.Movie{ContentID: "sibling-reconcile-error", ID: "sibling-reconcile-error"}

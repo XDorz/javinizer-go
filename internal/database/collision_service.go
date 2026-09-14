@@ -58,6 +58,10 @@ func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution s
 		return 0, wrapDBErr("load", fmt.Sprintf("credit %d", collision.CreditID), err)
 	}
 	creditPtr := &credit
+	oldCanonicalName := ""
+	if credit.Actress != nil {
+		oldCanonicalName = credit.Actress.FullName()
+	}
 
 	switch resolution {
 	case models.CollisionResolutionKeepIdentity:
@@ -145,6 +149,9 @@ func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution s
 	}
 
 	if resolution == models.CollisionResolutionAdoptCanonical {
+		if err := retargetActressAliasesTx(tx, credit.ActressID, oldCanonicalName); err != nil {
+			return 0, err
+		}
 		if err := reconcileActressCollisionsTx(tx, credit.ActressID); err != nil {
 			return 0, err
 		}
@@ -345,6 +352,27 @@ func isCJK(s string) bool {
 		}
 	}
 	return false
+}
+
+func retargetActressAliasesTx(tx *gorm.DB, actressID uint, oldCanonicalName string) error {
+	if strings.TrimSpace(oldCanonicalName) == "" {
+		return nil
+	}
+	var actress models.Actress
+	if err := tx.First(&actress, actressID).Error; err != nil {
+		return wrapDBErr("load", fmt.Sprintf("actress %d", actressID), err)
+	}
+	newCanonicalName := actress.FullName()
+	if strings.TrimSpace(newCanonicalName) == "" || oldCanonicalName == newCanonicalName {
+		return nil
+	}
+	if err := tx.Model(&models.ActressAlias{}).Where("canonical_name = ?", oldCanonicalName).Updates(map[string]interface{}{
+		colCanonicalName: newCanonicalName,
+		colUpdatedAt:     time.Now().UTC(),
+	}).Error; err != nil {
+		return wrapDBErr("retarget", fmt.Sprintf("actress aliases for %d", actressID), err)
+	}
+	return nil
 }
 
 func upsertAliasTx(tx *gorm.DB, alias *models.ActressAlias) error {

@@ -483,6 +483,9 @@ func (r *ActressRepository) ImportUpsert(ctx context.Context, incoming *models.A
 	incoming.CreatedAt = existing.CreatedAt
 	incoming.Verified = true
 	incoming.Origin = ActressOriginImport
+	if incoming.DMMID == 0 && existing.DMMID > 0 {
+		incoming.DMMID = existing.DMMID
+	}
 	if existing.Verified && (existing.Origin == ActressOriginUser || existing.Origin == ActressOriginImport) {
 		incoming.Verified = existing.Verified
 		incoming.Origin = existing.Origin
@@ -524,7 +527,55 @@ func (r *ActressRepository) findImportMatch(ctx context.Context, incoming *model
 	if !errors.Is(candidateErr, gorm.ErrRecordNotFound) {
 		return nil, wrapDBErr("find", fmt.Sprintf("import candidate %s", incoming.FullName()), candidateErr)
 	}
-	return nil, nil
+	if actressNameKey(incoming) == "" {
+		return nil, nil
+	}
+	candidate, candidateErr = r.findDMMCandidateByExactName(ctx, incoming)
+	if candidateErr != nil {
+		return nil, candidateErr
+	}
+	return candidate, nil
+}
+
+func (r *ActressRepository) findDMMCandidateByExactName(ctx context.Context, incoming *models.Actress) (*models.Actress, error) {
+	var candidates []models.Actress
+	if err := r.GetDB().WithContext(ctx).
+		Where("verified = ? AND dmm_id > ?", false, 0).
+		Find(&candidates).Error; err != nil {
+		return nil, wrapDBErr("find", fmt.Sprintf("DMM import candidate %s", incoming.FullName()), err)
+	}
+	matches := make([]models.Actress, 0, len(candidates))
+	for i := range candidates {
+		if exactActressNamesMatch(incoming, &candidates[i]) {
+			matches = append(matches, candidates[i])
+		}
+	}
+	if len(matches) != 1 {
+		return nil, nil
+	}
+	return &matches[0], nil
+}
+
+func exactActressNamesMatch(left, right *models.Actress) bool {
+	if left == nil || right == nil {
+		return false
+	}
+	if japanese := models.NormalizeActressNameKey(left.JapaneseName); japanese != "" && japanese == models.NormalizeActressNameKey(right.JapaneseName) {
+		return true
+	}
+	leftFirst, leftLast := strings.TrimSpace(left.FirstName), strings.TrimSpace(left.LastName)
+	rightFirst, rightLast := strings.TrimSpace(right.FirstName), strings.TrimSpace(right.LastName)
+	if leftFirst != "" && leftLast != "" && rightFirst != "" && rightLast != "" {
+		return models.NormalizeActressNameKey(leftLast+" "+leftFirst) == models.NormalizeActressNameKey(rightLast+" "+rightFirst) ||
+			models.NormalizeActressNameKey(leftFirst+" "+leftLast) == models.NormalizeActressNameKey(rightFirst+" "+rightLast)
+	}
+	if leftFirst != "" && leftLast == "" {
+		return rightLast == "" && models.NormalizeActressNameKey(leftFirst) == models.NormalizeActressNameKey(rightFirst)
+	}
+	if leftLast != "" && leftFirst == "" {
+		return rightFirst == "" && models.NormalizeActressNameKey(leftLast) == models.NormalizeActressNameKey(rightLast)
+	}
+	return false
 }
 
 func fillEmptyActressFields(existing, incoming *models.Actress) {
