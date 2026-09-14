@@ -168,6 +168,19 @@ func TestMatchFile_RemasterPartsPreserveRelease(t *testing.T) {
 	assert.Equal(t, 0, got.PartNumber)
 }
 
+func TestMatchFile_UnknownCodecTagsAfterRemaster(t *testing.T) {
+	m, err := NewMatcher(&Config{})
+	require.NoError(t, err)
+
+	for _, name := range []string{"ABC.123.HD VVC1.mkv", "ABC.123.HD AVS3.mkv"} {
+		t.Run(name, func(t *testing.T) {
+			got := matchOne(t, m, name)
+			require.NotNil(t, got)
+			assert.Equal(t, "ABC-123H", got.ID)
+		})
+	}
+}
+
 func TestMatchFile_QualityTagHDIsNotRemaster(t *testing.T) {
 	m, err := NewMatcher(&Config{})
 	require.NoError(t, err)

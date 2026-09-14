@@ -44,7 +44,7 @@ func builtinQualityShadowsContentID(name, id string) bool {
 	return idText != ""
 }
 
-func normalizeFusedRemasterFilename(name string) string {
+func normalizeFusedRemasterFilename(name string, builtinPattern *regexp.Regexp) string {
 	m := fusedRemasterRegex.FindStringSubmatchIndex(name)
 	fused := m != nil
 	if m == nil {
@@ -59,7 +59,16 @@ func normalizeFusedRemasterFilename(name string) string {
 	// Compact codec/resolution tags (x265, FHD720) also match the trailing id
 	// alternatives; they are tags, not replacement ids, so veto the suppression.
 	if candidate := trailingCatalogIDRegex.FindString(remainder); candidate != "" && !trailingQualityTagRegex.MatchString(candidate) {
-		return normalizeFusedRemasterFilename(name[m[1]:])
+		replacement := name[m[1]:]
+		if normalized := normalizeFusedRemasterFilename(replacement, builtinPattern); normalized != "" {
+			return normalized
+		}
+		if builtinPattern.FindStringIndex(replacement) != nil {
+			return replacement
+		}
+		if idText, _ := contentIDPrefixMatch(replacement); idText != "" {
+			return replacement
+		}
 	}
 	// A prefix-free compact t28 tail with a three-digit number reads as the
 	// T-series release T-28123H (catalog-prefixed or separator-pinned forms

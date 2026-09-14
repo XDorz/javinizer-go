@@ -106,7 +106,7 @@ func (m *Matcher) MatchFile(file models.FileMatchInfo) *MatchResult {
 		}
 	}
 
-	if normalized := normalizeFusedRemasterFilename(nameWithoutExt); normalized != "" {
+	if normalized := normalizeFusedRemasterFilename(nameWithoutExt, m.builtinPattern); normalized != "" {
 		nameWithoutExt = normalized
 	}
 
@@ -232,7 +232,7 @@ func (m *Matcher) MatchString(s string) string {
 		}
 	}
 
-	if normalized := normalizeFusedRemasterFilename(s); normalized != "" {
+	if normalized := normalizeFusedRemasterFilename(s, m.builtinPattern); normalized != "" {
 		s = normalized
 	}
 

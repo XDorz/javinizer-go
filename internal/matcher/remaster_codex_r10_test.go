@@ -73,6 +73,8 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 		{"ABC.123.HD scene-2.mkv", "ABC-123H"},
 		{"ABC.123.HD AVC1.mkv", "ABC-123H"},
 		{"ABC.123.HD AAC2.mkv", "ABC-123H"},
+		{"ABC.123.HD VVC1.mkv", "ABC-123H"},
+		{"ABC.123.HD AVS3.mkv", "ABC-123H"},
 		// Plain forms are unchanged.
 		{"ABC.123.HD.mkv", "ABC-123H"},
 		{"RCT156H.mkv", "RCT-156H"},
