@@ -54,6 +54,54 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+type dumpDVDRow struct {
+	contentID   string
+	dvdID       string
+	releaseDate string
+	serviceCode string
+}
+
+func (s *Store) selectDVDRow(ctx context.Context, key, id string) (dumpDVDRow, bool, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT content_id, dvd_id, release_date, service_code FROM videos WHERE dvd_id_norm = ? ORDER BY content_id",
+		key,
+	)
+	if err != nil {
+		return dumpDVDRow{}, false, fmt.Errorf("dump dvd_id lookup failed for %q: %w", key, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	matches := make([]dumpDVDRow, 0)
+	for rows.Next() {
+		var row dumpDVDRow
+		var dvdID, releaseDate, serviceCode sql.NullString
+		if err := rows.Scan(&row.contentID, &dvdID, &releaseDate, &serviceCode); err != nil {
+			return dumpDVDRow{}, false, fmt.Errorf("dump dvd_id lookup failed for %q: scan: %w", key, err)
+		}
+		row.dvdID = dvdID.String
+		row.releaseDate = releaseDate.String
+		row.serviceCode = serviceCode.String
+		matches = append(matches, row)
+	}
+	if err := rows.Err(); err != nil {
+		return dumpDVDRow{}, false, fmt.Errorf("dump dvd_id lookup failed for %q: %w", key, err)
+	}
+	if len(matches) == 0 {
+		return dumpDVDRow{}, false, nil
+	}
+
+	byContentID := make(map[string]dumpDVDRow, len(matches))
+	for _, row := range matches {
+		byContentID[strings.ToLower(row.contentID)] = row
+	}
+	for _, candidate := range ContentIDCandidatesWithMarker(id) {
+		if row, ok := byContentID[strings.ToLower(candidate)]; ok {
+			return row, true, nil
+		}
+	}
+	return matches[0], true, nil
+}
+
 // LookupByDVDID resolves a display dvd_id (e.g. "IPX-535") to its DMM
 // content_id. The query is matched against a normalized dvd_id column
 // (uppercase, hyphens and whitespace stripped), so "IPX-535", "ipx535", and
@@ -62,17 +110,13 @@ func (s *Store) LookupByDVDID(ctx context.Context, dvdID string) (string, error)
 	if s == nil || dvdID == "" {
 		return "", models.ErrDumpMiss
 	}
-	var contentID string
 	for _, key := range dumpNormKeys(dvdID) {
-		err := s.db.QueryRowContext(ctx,
-			"SELECT content_id FROM videos WHERE dvd_id_norm = ? ORDER BY content_id LIMIT 1",
-			key,
-		).Scan(&contentID)
-		if err == nil {
-			return contentID, nil
+		row, found, err := s.selectDVDRow(ctx, key, dvdID)
+		if err != nil {
+			return "", err
 		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return "", fmt.Errorf("dump lookup by dvd_id %q: %w", key, err)
+		if found {
+			return row.contentID, nil
 		}
 	}
 	return "", models.ErrDumpMiss
@@ -115,20 +159,17 @@ func (s *Store) MatchByDisplayID(ctx context.Context, id string) ([]models.DumpM
 	norm := normalizeDVDID(id)
 	if norm != "" {
 		for _, key := range dumpNormKeys(id) {
-			var m models.DumpMatch
-			var dvdID, rel, svc sql.NullString
-			err := s.db.QueryRowContext(ctx,
-				"SELECT content_id, dvd_id, release_date, service_code FROM videos WHERE dvd_id_norm = ? ORDER BY content_id LIMIT 1",
-				key,
-			).Scan(&m.ContentID, &dvdID, &rel, &svc)
-			if err == nil {
-				m.DVDID = dvdID.String
-				m.ReleaseDate = rel.String
-				m.ServiceCode = svc.String
-				return []models.DumpMatch{m}, nil
+			row, found, err := s.selectDVDRow(ctx, key, id)
+			if err != nil {
+				return nil, err
 			}
-			if !errors.Is(err, sql.ErrNoRows) {
-				return nil, fmt.Errorf("dump dvd_id lookup failed for %q: %w", key, err)
+			if found {
+				return []models.DumpMatch{{
+					ContentID:   row.contentID,
+					DVDID:       row.dvdID,
+					ReleaseDate: row.releaseDate,
+					ServiceCode: row.serviceCode,
+				}}, nil
 			}
 		}
 	}
@@ -230,6 +271,13 @@ func (s *Store) LookupMovie(ctx context.Context, dvdID string) (*models.DumpMovi
 	var err error
 	var found bool
 	for _, key := range keys {
+		row, rowFound, selectErr := s.selectDVDRow(ctx, key, dvdID)
+		if selectErr != nil {
+			return nil, selectErr
+		}
+		if !rowFound {
+			continue
+		}
 		err = s.db.QueryRowContext(ctx, `SELECT
 		content_id, dvd_id, title_en, title_ja, comment_en, comment_ja,
 		runtime_mins, release_date, sample_url,
@@ -238,7 +286,7 @@ func (s *Store) LookupMovie(ctx context.Context, dvdID string) (*models.DumpMovi
 		gallery_full_first, gallery_full_last,
 		gallery_thumb_first, gallery_thumb_last,
 		site_id, service_code
-		FROM videos WHERE dvd_id_norm = ? ORDER BY content_id LIMIT 1`, key,
+		FROM videos WHERE dvd_id_norm = ? AND content_id = ? LIMIT 1`, key, row.contentID,
 		).Scan(
 			&m.ContentID, &dvdIDCol, &titleEn, &titleJa, &commentEn, &commentJa,
 			&runtime, &releaseDate, &sampleURL,
