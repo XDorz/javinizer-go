@@ -23,13 +23,19 @@ var (
 	zeroPaddedRawTokenRegex = regexp.MustCompile(`(?i)^(?:t28|[a-z]+)0\d{3,4}[a-z]{0,3}$`)
 )
 
-func builtinStartsInsideContentID(s string, pattern *regexp.Regexp) bool {
+func builtinMatchConflictsWithContentID(s string, pattern *regexp.Regexp) bool {
 	start, end, ok := contentIDCandidate(s)
 	if !ok {
 		return false
 	}
 	match := pattern.FindStringSubmatchIndex(s)
-	return len(match) > 3 && match[2] > start && match[2] < end
+	if len(match) <= 3 || (match[2] <= start && match[3] >= end) {
+		return false
+	}
+	if match[2] < end && match[3] > start {
+		return true
+	}
+	return !strings.ContainsAny(s[match[2]:match[3]], "-_")
 }
 
 // builtinQualityShadowsContentID reports whether the builtin-captured id is

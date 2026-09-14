@@ -263,7 +263,7 @@ func guardRemasterResult(id string, res *models.ScraperResult) (*models.ScraperR
 		return nil, models.NewScraperNotFoundError("R18.dev", "response does not carry the requested remaster identity")
 	}
 	if !isRawRemasterContentIDQuery(id) {
-		res.ID = canonicalRemasterDisplayID(id)
+		res.ID = canonicalRemasterDisplayID(res.ID)
 	} else if res.ID != "" && rawDisplayMatchesCID(res.ContentID, res.ID) {
 		res.ID = canonicalRemasterDisplayID(res.ID)
 	} else {

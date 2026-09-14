@@ -54,6 +54,10 @@ func TestMatchFile_YearWordYieldsToStrongerRawID(t *testing.T) {
 	require.NotNil(t, got)
 	assert.Equal(t, "1RCT00156H", got.ID, "a word+year prefixless shape must not outrank a later numeric-prefixed raw id")
 
+	got = matchOne(t, m, "sample2024 1rct00156h.mkv")
+	require.NotNil(t, got)
+	assert.Equal(t, "1RCT00156H", got.ID, "MatchFile must choose the later raw ID over a year-shaped prefix")
+
 	got = matchOne(t, m, "documentary2024 dv00899ai.mkv")
 	require.NotNil(t, got)
 	assert.Equal(t, "DV00899AI", got.ID, "a word+year prefixless shape must not outrank a later marker-bearing raw id")
@@ -61,6 +65,8 @@ func TestMatchFile_YearWordYieldsToStrongerRawID(t *testing.T) {
 	got = matchOne(t, m, "birthday2024 1920x1080 1rct00156h.mkv")
 	require.NotNil(t, got)
 	assert.Equal(t, "1RCT00156H", got.ID, "resolution-shaped tokens are skipped during the stronger-candidate scan")
+
+	assert.Equal(t, "1RCT00156H", m.MatchString("sample2024 1rct00156h.mkv"), "MatchString must choose the later raw ID over a year-shaped prefix")
 }
 
 func TestMatchFile_QualityPrefixBeforeRawID(t *testing.T) {

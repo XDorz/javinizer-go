@@ -52,7 +52,7 @@ func TestT28RemasterSearch(t *testing.T) {
 	assert.False(t, cidMatchesMarker("t28123h", "h", "t28"), "the prefix-free five-digit reading belongs to series t")
 	assert.True(t, cidMatchesMarker("1t28000123hd", "h", "t28"), "longer number tails stay series t28")
 
-	out, err := guardRemasterResult("T-28123-HD", &models.ScraperResult{ContentID: "t28123h"})
+	out, err := guardRemasterResult("T-28123-HD", &models.ScraperResult{ContentID: "t28123h", ID: "T-28123-HD"})
 	require.NoError(t, err)
 	assert.Equal(t, "T-28123H", out.ID, "a T-28123-HD query accepts its t28123h cid on the guard path")
 }

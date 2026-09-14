@@ -59,6 +59,11 @@ func TestRemasterHelpers(t *testing.T) {
 	require.NotNil(t, guarded)
 	assert.Equal(t, "DV-818AI", guarded.ID, "server-provided display ID is canonicalized")
 
+	guarded, gerr = guardRemasterResult("RCT-00156-HD", &models.ScraperResult{ContentID: "1rct00156h", ID: "RCT-156-HD"})
+	assert.NoError(t, gerr)
+	require.NotNil(t, guarded)
+	assert.Equal(t, "RCT-156H", guarded.ID, "display canonicalization must use the verified server ID, not query padding")
+
 	guarded, gerr = guardRemasterResult("1ipx00535zh", &models.ScraperResult{ContentID: "1ipx00535zh", ID: "IPX-535-HD"})
 	assert.NoError(t, gerr)
 	require.NotNil(t, guarded)

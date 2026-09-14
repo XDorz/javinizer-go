@@ -75,7 +75,7 @@ func TestSearchRemasterUnderscoreCatalogPrefixes(t *testing.T) {
 				require.NoError(t, err)
 				assert.Equal(t, cid, result.ContentID)
 				if query == "ABC-123H" {
-					assert.Equal(t, query, result.ID)
+					assert.Empty(t, result.ID)
 				}
 			})
 		}
