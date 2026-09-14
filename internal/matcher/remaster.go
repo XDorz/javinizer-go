@@ -62,6 +62,15 @@ func normalizeFusedRemasterFilename(name string, builtinPattern *regexp.Regexp) 
 	if m == nil {
 		return ""
 	}
+	if !fused {
+		separatedID := name[m[2]:m[3]] + name[m[4]:m[5]]
+		if m[6] >= 0 {
+			separatedID += name[m[6]:m[7]]
+		}
+		if weakWordYearRegex.MatchString(separatedID) {
+			return normalizeFusedRemasterFilename(name[m[1]:], builtinPattern)
+		}
+	}
 	// Part labels (part-2, pt 3) are not catalog ids and must not suppress
 	// the fused normalization.
 	remainder := remasterPartLabelRegex.ReplaceAllString(name[m[1]:], "")
