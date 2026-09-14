@@ -11,6 +11,11 @@ import (
 // spelling, so the marker survives (IPX-535-H-720p); and a quality label
 // before the real catalog id must be suppressed for the same catalog grammar
 // the matcher accepts, with the id then extracted from the remainder.
+func TestBuiltinQualityShadowsContentID(t *testing.T) {
+	assert.True(t, builtinQualityShadowsContentID("x265 1rct00156h", "x265"))
+	assert.False(t, builtinQualityShadowsContentID("x265", "x265"))
+}
+
 func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 	m, err := NewMatcher(&Config{})
 	require.NoError(t, err)
