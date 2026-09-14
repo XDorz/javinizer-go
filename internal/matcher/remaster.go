@@ -15,7 +15,7 @@ var (
 	trailingQualityTagRegex = regexp.MustCompile(`(?i)\b(?:[hx]26[3-9]|avc\d*|aac\d*|hevc\d*|ac3|dts|flac|opus|truehd|vc1|av1|mp[34]|ddp\d*|eac3|divx\d*|xvid\d*|prores\d*|yuv\d*|mpeg\d*|vp\d+|fhd\d{2,4}|uhd\d{2,4}|hdtv|hdr\d*)\b`)
 	remasterPartLabelRegex  = regexp.MustCompile(`(?i)\b(?:part|pt|disc|vol|cd)-?\d{1,2}\b`)
 	resolutionTokenRegex    = regexp.MustCompile(`(?i)^\d{3,4}x\d{3,4}$`)
-	resolutionTailRegex     = regexp.MustCompile(`(?i)^[-_.\s]?(?:\d{3,4}[pi]|\d{3,4}x\d{3,4}|(?:240|360|480|540|576|720))(?:\D|$)`)
+	resolutionTailRegex     = regexp.MustCompile(`(?i)^[-_.\s]?(?:\d{3,4}[pi]|\d{3,4}x\d{3,4}|(?:144|240|288|360|480|540|576|720))(?:\D|$)`)
 	framerateTokenRegex     = regexp.MustCompile(`(?i)^\d{3,4}[pi](?:\d{2,3})?$`)
 	remasterMarkerTailRegex = regexp.MustCompile(`(?i)(?:ez)?(?:hd|ai|h)$`)
 	rawTokenRegex           = regexp.MustCompile(`[A-Za-z0-9]+`)

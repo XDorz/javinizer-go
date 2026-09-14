@@ -25,7 +25,9 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 		{"IPX-535-H-720.mkv", "IPX-535H"},
 		{"IPX-535-HD-480.mkv", "IPX-535H"},
 		{"IPX-535-H-576.mkv", "IPX-535H"},
+		{"IPX-535-HD-144.mkv", "IPX-535H"},
 		{"IPX-535-HD-240.mkv", "IPX-535H"},
+		{"IPX-535-HD-288.mkv", "IPX-535H"},
 		{"IPX-535-HD-360.mkv", "IPX-535H"},
 		{"IPX-535-HD-540.mkv", "IPX-535H"},
 		// Numbered quality tags (HDR10, HEVC10) are tags, not catalog ids.
@@ -89,7 +91,7 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 		})
 	}
 
-	for _, name := range []string{"IPX-535-HD-240.mkv", "IPX-535-HD-360.mkv", "IPX-535-HD-540.mkv"} {
+	for _, name := range []string{"IPX-535-HD-144.mkv", "IPX-535-HD-240.mkv", "IPX-535-HD-288.mkv", "IPX-535-HD-360.mkv", "IPX-535-HD-540.mkv"} {
 		fileResult := matchOne(t, m, name)
 		require.NotNil(t, fileResult)
 		assert.Equal(t, "IPX-535H", fileResult.ID)
