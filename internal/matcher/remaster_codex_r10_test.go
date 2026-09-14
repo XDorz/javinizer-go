@@ -68,6 +68,7 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 		{"FHD 1080 HD ABEAUTY-123-HD.mkv", "ABEAUTY-123H"},
 		{"FHD 1080 HD T28.123.HD.mkv", "T28-123H"},
 		{"FHD 1080 HD T28 123 HD.mkv", "T28-123H"},
+		{"FHD 1080 HD IPX-480.mkv", "IPX-480"},
 		{"QUALITY 1080 HD AB123.mkv", "AB123"},
 		{"QUALITY 1080 HD ABC123.mkv", "ABC123"},
 		{"QUALITY 1080 HD A123.mkv", "A123"},
@@ -77,6 +78,8 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 		{"ABC.123.HD YCbCr420.mkv", "ABC-123H"},
 		{"QUALITY 1080 HD ABCDEFGHI.123.HD.mkv", "ABCDEFGHI-123H"},
 		{"birthday2024.mkv", ""},
+		{"birthday2024hdr.mkv", ""},
+		{"birthday2024raw.mkv", ""},
 		{"documentary2024.mkv", ""},
 		// Codec tags trailing the real id must not keep the leading quality
 		// phrase alive or shadow the stronger raw content id.
@@ -125,7 +128,13 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 	assert.Equal(t, "ABC-123H", fileResult.ID)
 
 	assert.Nil(t, matchOne(t, m, "birthday2024.mkv"))
+	assert.Nil(t, matchOne(t, m, "birthday2024hdr.mkv"))
+	assert.Nil(t, matchOne(t, m, "birthday2024raw.mkv"))
 	assert.Nil(t, matchOne(t, m, "documentary2024.mkv"))
+
+	fileResult = matchOne(t, m, "FHD 1080 HD IPX-480.mkv")
+	require.NotNil(t, fileResult)
+	assert.Equal(t, "IPX-480", fileResult.ID)
 
 	fileResult = matchOne(t, m, "IPX535 10bit420.mkv")
 	require.NotNil(t, fileResult)
