@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -49,4 +50,29 @@ func TestSearchPaddedDisplayFallback(t *testing.T) {
 		require.NotNil(t, res)
 		assert.Equal(t, "RCT-156H", res.ID, "page zero-trimmed value wins over the padded query spelling")
 	})
+}
+
+// A cached content-id mapping short-circuits on-line verification; when the
+// AI cid page carries no 品番 row the parse publishes an empty display id and
+// Search fills it from the query's canonical spelling.
+func TestSearchAIFallbackFillsEmptyPageID(t *testing.T) {
+	s, repo := newRemasterTestScraper(t)
+	require.NoError(t, repo.Create(context.Background(), &models.ContentIDMapping{
+		SearchID:  "DV-818-AI",
+		ContentID: "dv00899ai",
+		Source:    "dmm",
+	}))
+	rt := &remasterRoundTripper{serve: func(u string) (int, string) {
+		switch {
+		case strings.Contains(u, "cid=dv00899ai"):
+			return 200, "<html><body><h1 id=\"title\" class=\"item\">AI Remaster</h1></body></html>"
+		}
+		return 404, ""
+	}}
+	s.client.SetTransport(rt)
+
+	res, err := s.Search(context.Background(), "DV-818-AI")
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Equal(t, "DV-818AI", res.ID, "canonical query spelling fills the empty page id")
 }
