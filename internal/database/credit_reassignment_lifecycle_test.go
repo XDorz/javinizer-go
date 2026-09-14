@@ -123,6 +123,41 @@ func TestCreditReassignmentCleanupErrors(t *testing.T) {
 	require.Error(t, moveCreditReassignmentsTx(db.DB, 1, 2))
 }
 
+func TestCreditReassignmentCallerErrors(t *testing.T) {
+	t.Run("merge", func(t *testing.T) {
+		db := newCreditTestDB(t)
+		repo := NewActressRepository(db)
+		target := models.Actress{DMMID: 95001}
+		source := models.Actress{DMMID: 95002}
+		require.NoError(t, db.Create(&target).Error)
+		require.NoError(t, db.Create(&source).Error)
+		plan, err := repo.merger.PlanMerge(context.Background(), target.ID, source.ID, map[string]string{"dmm_id": "target"})
+		require.NoError(t, err)
+		require.NoError(t, db.Migrator().DropTable(&models.MovieCreditReassignment{}))
+
+		_, err = repo.merger.ExecuteMerge(context.Background(), plan, db)
+		require.Error(t, err)
+	})
+
+	t.Run("actress delete", func(t *testing.T) {
+		db := newCreditTestDB(t)
+		actress := models.Actress{DMMID: 95003}
+		require.NoError(t, db.Create(&actress).Error)
+		require.NoError(t, db.Migrator().DropTable(&models.MovieCreditReassignment{}))
+
+		require.Error(t, NewActressRepository(db).Delete(context.Background(), actress.ID))
+	})
+
+	t.Run("movie delete", func(t *testing.T) {
+		db := newCreditTestDB(t)
+		movie := models.Movie{ContentID: "reassignment-caller-error", ID: "reassignment-caller-error", Title: "Caller error"}
+		require.NoError(t, db.Create(&movie).Error)
+		require.NoError(t, db.Migrator().DropTable(&models.MovieCreditReassignment{}))
+
+		require.Error(t, NewMovieRepository(db).Delete(context.Background(), movie.ID))
+	})
+}
+
 func TestMoveCreditReassignmentsTxDeleteError(t *testing.T) {
 	db := newCreditTestDB(t)
 	source := models.Actress{DMMID: 93001}
