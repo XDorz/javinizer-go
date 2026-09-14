@@ -118,6 +118,13 @@ func TestIdentityCatalogOwnershipAndImports(t *testing.T) {
 	require.True(t, a.Verified)
 	require.NoError(t, r.SetUserOwned(ctx, a.ID))
 	require.Error(t, r.ImportUpsert(ctx, nil))
+	candidate := models.Actress{DMMID: 789, FirstName: "Candidate", LastName: "Scrape", Origin: ActressOriginScrape}
+	require.NoError(t, r.Create(ctx, &candidate))
+	candidateImport := models.Actress{DMMID: candidate.DMMID, FirstName: "Imported", LastName: "Person"}
+	require.NoError(t, r.ImportUpsert(ctx, &candidateImport))
+	require.True(t, candidateImport.Verified)
+	require.Equal(t, ActressOriginImport, candidateImport.Origin)
+
 	incoming := models.Actress{DMMID: 123, FirstName: "Import", LastName: "Person", JapaneseName: "輸入", ThumbURL: "import-thumb"}
 	require.NoError(t, r.ImportUpsert(ctx, &incoming))
 	require.True(t, incoming.Verified)

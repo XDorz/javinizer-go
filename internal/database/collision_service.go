@@ -145,6 +145,9 @@ func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution s
 	}
 
 	if resolution == models.CollisionResolutionAdoptCanonical {
+		if err := reconcileActressCollisionsTx(tx, credit.ActressID); err != nil {
+			return 0, err
+		}
 		if err := tx.Exec(
 			"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id IN (SELECT movie_content_id FROM movie_credits WHERE actress_id = ?)",
 			credit.ActressID,
@@ -265,6 +268,52 @@ func setCreditSuppressedTx(tx *gorm.DB, creditID uint, suppressed bool) error {
 		"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id = ?",
 		contentID,
 	).Error
+}
+
+func reconcileActressCollisionsTx(tx *gorm.DB, actressID uint) error {
+	var actress models.Actress
+	if err := tx.First(&actress, actressID).Error; err != nil {
+		return wrapDBErr("load", fmt.Sprintf("actress %d", actressID), err)
+	}
+
+	var collisions []models.CreditCollision
+	if err := tx.Model(&models.CreditCollision{}).
+		Joins("JOIN movie_credits ON movie_credits.id = credit_collisions.credit_id").
+		Where("movie_credits.actress_id = ? AND credit_collisions.status = ? AND credit_collisions.field IN ?", actressID, models.CollisionStatusOpen, []string{
+			models.CreditFieldCreditedName,
+			models.CreditFieldReportedThumb,
+			models.CreditFieldIdentityLink,
+		}).
+		Find(&collisions).Error; err != nil {
+		return wrapDBErr("list", fmt.Sprintf("open collisions for actress %d", actressID), err)
+	}
+
+	canonicalName := actress.FullName()
+	for i := range collisions {
+		collision := &collisions[i]
+		canonicalValue := canonicalName
+		matches := false
+		switch collision.Field {
+		case models.CreditFieldCreditedName, models.CreditFieldIdentityLink:
+			matches = strings.TrimSpace(collision.ReportedValue) != "" && strings.TrimSpace(canonicalValue) != "" &&
+				models.NormalizeActressNameKey(collision.ReportedValue) == models.NormalizeActressNameKey(canonicalValue)
+		case models.CreditFieldReportedThumb:
+			canonicalValue = actress.ThumbURL
+			matches = strings.TrimSpace(collision.ReportedValue) != "" && strings.TrimSpace(canonicalValue) != "" && collision.ReportedValue == canonicalValue
+		}
+		updates := map[string]interface{}{
+			"canonical_value": canonicalValue,
+			colUpdatedAt:      time.Now().UTC(),
+		}
+		if !collision.UserPinned && matches {
+			updates[colStatus] = models.CollisionStatusResolved
+			updates[colResolution] = models.CollisionResolutionAdoptCanonical
+		}
+		if err := tx.Model(&models.CreditCollision{}).Where("id = ?", collision.ID).Updates(updates).Error; err != nil {
+			return wrapDBErr("reconcile", fmt.Sprintf("collision %d", collision.ID), err)
+		}
+	}
+	return nil
 }
 
 func splitReportedName(reported string) (first, last string) {

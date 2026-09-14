@@ -478,6 +478,8 @@ func (r *ActressRepository) ImportUpsert(ctx context.Context, incoming *models.A
 	}
 	incoming.ID = existing.ID
 	incoming.CreatedAt = existing.CreatedAt
+	incoming.Verified = true
+	incoming.Origin = ActressOriginImport
 	if existing.Verified && (existing.Origin == ActressOriginUser || existing.Origin == ActressOriginImport) {
 		incoming.Verified = existing.Verified
 		incoming.Origin = existing.Origin

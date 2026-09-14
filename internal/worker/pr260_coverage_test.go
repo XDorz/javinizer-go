@@ -79,10 +79,69 @@ func TestApplyPhaseCollisionLookupFailureBlocksCandidatesPR260(t *testing.T) {
 		"one.mp4":   {Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "one", ContentID: "shared"}},
 		"two.mp4":   {Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "two", ContentID: "shared"}},
 	}
-	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{Destination: "/output"})
+	var organized, failed int
+	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
+		Destination: "/output",
+		OnPhaseComplete: func(org, fail int) {
+			organized, failed = org, fail
+		},
+	})
 	assert.Equal(t, 1, wf.getApplyCalled())
+	assert.Equal(t, 1, organized)
+	assert.Equal(t, 2, failed)
 }
 
+func TestApplyPhaseCollisionLookupFailureCountsRetryBlockedFilePR260(t *testing.T) {
+	repo := mocks.NewMockCreditCollisionRepositoryInterface(t)
+	repo.EXPECT().CountOpenByMovieBatch(mock.Anything, mock.Anything).Return(nil, errors.New("database unavailable"))
+	wf := &stubApplyWorkflow{applyResult: &workflow.ApplyResult{Movie: &models.Movie{ID: "clear"}}}
+	inputs := makeApplyInputs(wf)
+	inputs.CollisionRepo = repo
+	inputs.Results = map[string]*resultstore.MovieResult{
+		"blocked.mp4": {Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "blocked", ContentID: "blocked"}},
+		"clear.mp4":   {Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "clear"}},
+	}
+	var organized, failed int
+	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
+		Destination:    "/output",
+		RetryFilePaths: []string{"blocked.mp4", "clear.mp4"},
+		OnPhaseComplete: func(org, fail int) {
+			organized, failed = org, fail
+		},
+	})
+	assert.Equal(t, 1, wf.getApplyCalled())
+	assert.Equal(t, 1, organized)
+	assert.Equal(t, 1, failed)
+}
+
+func TestApplyPhaseCollisionLookupFailureWithOnlyIDsFailsRunPR260(t *testing.T) {
+	repo := mocks.NewMockCreditCollisionRepositoryInterface(t)
+	repo.EXPECT().CountOpenByMovieBatch(mock.Anything, mock.Anything).Return(nil, errors.New("database unavailable"))
+	wf := &stubApplyWorkflow{applyResult: &workflow.ApplyResult{Movie: &models.Movie{ID: "unused"}}}
+	inputs := makeApplyInputs(wf)
+	inputs.CollisionRepo = repo
+	inputs.Results = map[string]*resultstore.MovieResult{
+		"one.mp4": {Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "one", ContentID: "one"}},
+		"two.mp4": {Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "two", ContentID: "two"}},
+	}
+	called := false
+	var organized, failed int
+	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
+		Destination: "/output",
+		OnPhaseComplete: func(org, fail int) {
+			called = true
+			organized, failed = org, fail
+		},
+	})
+	lifecycle := inputs.Lifecycle.(*stubLifecycle)
+	assert.True(t, called)
+	assert.Zero(t, organized)
+	assert.Equal(t, 2, failed)
+	assert.True(t, lifecycle.failed)
+	assert.False(t, lifecycle.completed)
+	assert.False(t, lifecycle.organized)
+	assert.Zero(t, wf.getApplyCalled())
+}
 func TestApplyPhaseCollisionCountsBlockOnlyOpenMoviesPR260(t *testing.T) {
 	repo := mocks.NewMockCreditCollisionRepositoryInterface(t)
 	repo.EXPECT().CountOpenByMovieBatch(mock.Anything, mock.Anything).Return(map[string]int64{"blocked": 1, "clear": 0}, nil)

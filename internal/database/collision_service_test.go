@@ -100,6 +100,79 @@ func TestCollisionServiceResolutions(t *testing.T) {
 	}
 }
 
+func TestCollisionServiceAdoptCanonicalReconcilesSiblingCollisions(t *testing.T) {
+	db, service, credit, collision := collisionFixture(t)
+	require.NoError(t, db.Model(&models.Actress{}).Where("id = ?", credit.ActressID).Update("thumb_url", "https://example.com/old.jpg").Error)
+	siblingMovie := models.Movie{ContentID: "sibling-collision", ID: "sibling-collision", Title: "Sibling"}
+	require.NoError(t, db.Create(&siblingMovie).Error)
+	siblingCredit := models.MovieCredit{MovieContentID: siblingMovie.ContentID, ActressID: credit.ActressID}
+	require.NoError(t, db.Create(&siblingCredit).Error)
+	rows := []models.CreditCollision{
+		{CreditID: siblingCredit.ID, MovieContentID: siblingMovie.ContentID, Field: models.CreditFieldCreditedName, ReportedValue: "Reported Person", CanonicalValue: "Old", Status: models.CollisionStatusOpen},
+		{CreditID: siblingCredit.ID, MovieContentID: siblingMovie.ContentID, Field: models.CreditFieldCreditedName, ReportedValue: "Other Person", CanonicalValue: "Old", Status: models.CollisionStatusOpen},
+		{CreditID: siblingCredit.ID, MovieContentID: siblingMovie.ContentID, Field: models.CreditFieldCreditedName, ReportedValue: "Reported  Person", CanonicalValue: "Old", Status: models.CollisionStatusOpen, UserPinned: true},
+		{CreditID: siblingCredit.ID, MovieContentID: siblingMovie.ContentID, Field: models.CreditFieldIdentityLink, ReportedValue: "Reported Person", CanonicalValue: "Old", Status: models.CollisionStatusOpen},
+		{CreditID: siblingCredit.ID, MovieContentID: siblingMovie.ContentID, Field: models.CreditFieldIdentityLink, ReportedValue: "Other Person", CanonicalValue: "Old", Status: models.CollisionStatusOpen},
+		{CreditID: siblingCredit.ID, MovieContentID: siblingMovie.ContentID, Field: models.CreditFieldReportedThumb, ReportedValue: "https://example.com/old.jpg", CanonicalValue: "stale", Status: models.CollisionStatusOpen},
+		{CreditID: siblingCredit.ID, MovieContentID: siblingMovie.ContentID, Field: models.CreditFieldReportedThumb, ReportedValue: "https://example.com/other.jpg", CanonicalValue: "stale", Status: models.CollisionStatusOpen},
+	}
+	for i := range rows {
+		require.NoError(t, db.Create(&rows[i]).Error)
+	}
+
+	remaining, err := service.Resolve(context.Background(), collision.ID, models.CollisionResolutionAdoptCanonical, 0)
+	require.NoError(t, err)
+	require.Zero(t, remaining)
+	var saved []models.CreditCollision
+	require.NoError(t, db.Where("credit_id = ?", siblingCredit.ID).Order("id ASC").Find(&saved).Error)
+	require.Len(t, saved, len(rows))
+	for _, row := range saved {
+		if row.Field == models.CreditFieldCreditedName || row.Field == models.CreditFieldIdentityLink {
+			require.Equal(t, "Reported Person", row.CanonicalValue)
+			if models.NormalizeActressNameKey(row.ReportedValue) == "reported person" && !row.UserPinned {
+				require.Equal(t, models.CollisionStatusResolved, row.Status)
+				require.Equal(t, models.CollisionResolutionAdoptCanonical, row.Resolution)
+			} else {
+				require.Equal(t, models.CollisionStatusOpen, row.Status)
+			}
+		} else {
+			require.Equal(t, "https://example.com/old.jpg", row.CanonicalValue)
+			if row.ReportedValue == row.CanonicalValue {
+				require.Equal(t, models.CollisionStatusResolved, row.Status)
+			} else {
+				require.Equal(t, models.CollisionStatusOpen, row.Status)
+			}
+		}
+	}
+}
+
+func TestCollisionServiceAdoptCanonicalReconciliationErrorRollsBack(t *testing.T) {
+	db, service, credit, collision := collisionFixture(t)
+	siblingMovie := models.Movie{ContentID: "sibling-reconcile-error", ID: "sibling-reconcile-error"}
+	require.NoError(t, db.Create(&siblingMovie).Error)
+	siblingCredit := models.MovieCredit{MovieContentID: siblingMovie.ContentID, ActressID: credit.ActressID}
+	require.NoError(t, db.Create(&siblingCredit).Error)
+	siblingCollision := models.CreditCollision{
+		CreditID:       siblingCredit.ID,
+		MovieContentID: siblingMovie.ContentID,
+		Field:          models.CreditFieldCreditedName,
+		ReportedValue:  "Other Person",
+		CanonicalValue: "Old",
+		Status:         models.CollisionStatusOpen,
+	}
+	require.NoError(t, db.Create(&siblingCollision).Error)
+	injectDatabaseCallbackError(t, db, "update", "credit_collisions", 2)
+
+	_, err := service.Resolve(context.Background(), collision.ID, models.CollisionResolutionAdoptCanonical, 0)
+	require.Error(t, err)
+	require.NoError(t, db.First(&collision, collision.ID).Error)
+	require.Equal(t, models.CollisionStatusOpen, collision.Status)
+	require.NoError(t, db.First(&credit, credit.ID).Error)
+	var actress models.Actress
+	require.NoError(t, db.First(&actress, credit.ActressID).Error)
+	require.Equal(t, "Truth", actress.FirstName)
+}
+
 func TestCollisionServiceInvalidResolutionRollsBack(t *testing.T) {
 	for _, tc := range []struct {
 		name, resolution string

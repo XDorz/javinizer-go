@@ -252,6 +252,23 @@ func TestPR260ActressRepositoryRemainingPaths(t *testing.T) {
 	})
 }
 
+func TestPR260ReconcileActressCollisionsErrors(t *testing.T) {
+	t.Run("actress lookup", func(t *testing.T) {
+		db := newCreditTestDB(t)
+		injectDatabaseCallbackError(t, db, "query", "actresses", 1)
+		require.Error(t, reconcileActressCollisionsTx(db.DB, 1))
+	})
+	t.Run("collision lookup", func(t *testing.T) {
+		db, _, credit, _ := collisionFixture(t)
+		injectDatabaseCallbackError(t, db, "query", "credit_collisions", 1)
+		require.Error(t, reconcileActressCollisionsTx(db.DB, credit.ActressID))
+	})
+	t.Run("collision update", func(t *testing.T) {
+		db, _, credit, _ := collisionFixture(t)
+		injectDatabaseCallbackError(t, db, "update", "credit_collisions", 1)
+		require.Error(t, reconcileActressCollisionsTx(db.DB, credit.ActressID))
+	})
+}
 func TestPR260CollisionServiceDatabaseErrors(t *testing.T) {
 	cases := []struct {
 		name, operation, table string

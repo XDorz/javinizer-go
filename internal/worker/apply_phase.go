@@ -313,6 +313,7 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 		retryPaths[filePath] = struct{}{}
 	}
 	blockedCollisions := map[string]bool{}
+	collisionGateUnavailable := false
 	if inputs.CollisionRepo != nil {
 		movieIDs := make([]string, 0, len(inputs.Results))
 		seen := make(map[string]bool, len(inputs.Results))
@@ -325,6 +326,7 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 		}
 		counts, err := inputs.CollisionRepo.CountOpenByMovieBatch(ctx, movieIDs)
 		if err != nil {
+			collisionGateUnavailable = true
 			logging.Errorf("[Apply] collision gate lookup failed; failing closed for this run: %v", err)
 			for filePath, fileResult := range inputs.Results {
 				if fileResult.Movie != nil && fileResult.Movie.ContentID != "" {
@@ -348,12 +350,10 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 	}
 
 	items := make([]applyItem, 0, len(inputs.Results))
+	collisionGateFailures := make(map[string]struct{})
 	for filePath, fileResult := range inputs.Results {
 		_, retryFailed := retryPaths[filePath]
 		if fileResult.Movie == nil {
-			continue
-		}
-		if fileResult.Movie != nil && blockedCollisions[fileResult.Movie.ContentID] {
 			continue
 		}
 		if len(retryPaths) > 0 {
@@ -367,11 +367,24 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 			logging.Infof("Skipping excluded file: %s", filePath)
 			continue
 		}
+		if blockedCollisions[fileResult.Movie.ContentID] {
+			if collisionGateUnavailable {
+				collisionGateFailures[filePath] = struct{}{}
+			}
+			continue
+		}
 		items = append(items, applyItem{
 			filePath:   filePath,
 			fileResult: fileResult,
 			movie:      fileResult.Movie,
 		})
+	}
+	if len(collisionGateFailures) > 0 && len(items) == 0 {
+		if cfg.OnPhaseComplete != nil {
+			cfg.OnPhaseComplete(0, len(collisionGateFailures))
+		}
+		inputs.Lifecycle.MarkFailed()
+		return
 	}
 
 	// Apply workers are intentionally concurrent, so slice order alone cannot
@@ -472,6 +485,13 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 	failCount := atomic.LoadInt64(&failed)
 	if len(cfg.RetryFilePaths) > 0 {
 		failCount = countRemainingApplyFailures(inputs, outcomes)
+		for filePath := range collisionGateFailures {
+			if result := inputs.Results[filePath]; result == nil || result.Status != models.JobStatusFailed {
+				failCount++
+			}
+		}
+	} else {
+		failCount += int64(len(collisionGateFailures))
 	}
 
 	// Broadcast the final organization_completed / update_completed WebSocket
