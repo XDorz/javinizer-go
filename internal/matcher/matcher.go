@@ -118,7 +118,7 @@ func (m *Matcher) MatchFile(file models.FileMatchInfo) *MatchResult {
 	if idText, remainder := contentIDPrefixMatch(nameWithoutExt); idText != "" {
 		result := &MatchResult{File: file, ID: strings.ToUpper(idText), MatchedBy: "contentid"}
 		if remainder != "" {
-			num, suffix, patternType, trailingPrefix := DetectPartSuffix(nameWithoutExt, idText)
+			num, suffix, patternType, trailingPrefix := DetectPartSuffix(remainder, "")
 			result.PartNumber = num
 			result.PartSuffix = suffix
 			result.MultipartPattern = patternType

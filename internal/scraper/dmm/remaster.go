@@ -268,8 +268,8 @@ func parseAnchoredMarkerCID(clean string) (folded string, suffix string, ok bool
 // extractRemasterContentIDCandidates scans a DMM search document for anchors
 // whose content id shares the query's series and folded marker (number-free:
 // the server owns the number). The persisted form is the verbatim
-// rental-normalized URL cid; deduplication is by prefix-cleaned identity with
-// the catalog-digit-prefixed spelling preferred as representative.
+// rental-normalized URL cid; candidates remain distinct when their normalized
+// content IDs differ.
 type remasterCandidate struct {
 	contentID string
 	cleanID   string
@@ -319,19 +319,18 @@ func extractRemasterContentIDCandidates(doc *goquery.Document, wantSeries, wantF
 }
 
 // resolveRemasterContentID resolves a marker-bearing query via DMM search:
-// accumulate candidates across ALL query variations, dedupe by cleaned cid,
-// accept a single distinct cid directly, and verify ambiguous cases via
-// product-page display IDs.
+// accumulate candidates across ALL query variations, dedupe repeated URLs
+// for the same normalized content ID, and verify candidates via product-page
+// display IDs.
 func (s *scraper) resolveRemasterContentID(ctx context.Context, id, normalizedID, foldedMarker, series, catalogSuffix string) (string, error) {
 	queries := uniqueNonEmptyStrings(append(buildResolveContentIDSearchQueries(id, normalizeContentID(id)), remasterSearchSpellings(id)...))
 
 	type aggCand struct {
 		contentID string
-		cleanID   string
 		urls      []string
 	}
 	order := []string{}
-	byClean := map[string]*aggCand{}
+	byContentID := map[string]*aggCand{}
 
 	for _, query := range queries {
 		searchURLFormatted := fmt.Sprintf(searchURL, query)
@@ -356,19 +355,16 @@ func (s *scraper) resolveRemasterContentID(ctx context.Context, id, normalizedID
 			pageCands = extractRemasterContentIDCandidates(doc, series, foldedMarker, catalogSuffix)
 		}
 		for _, c := range pageCands {
-			if existing, ok := byClean[c.cleanID]; ok {
+			if existing, ok := byContentID[c.contentID]; ok {
 				for _, u := range c.urls {
 					if !slices.Contains(existing.urls, u) {
 						existing.urls = append(existing.urls, u)
 					}
 				}
-				if len(c.contentID) > len(existing.contentID) {
-					existing.contentID = c.contentID
-				}
 				continue
 			}
-			byClean[c.cleanID] = &aggCand{contentID: c.contentID, cleanID: c.cleanID, urls: append([]string{}, c.urls...)}
-			order = append(order, c.cleanID)
+			byContentID[c.contentID] = &aggCand{contentID: c.contentID, urls: append([]string{}, c.urls...)}
+			order = append(order, c.contentID)
 		}
 	}
 
@@ -381,18 +377,18 @@ func (s *scraper) resolveRemasterContentID(ctx context.Context, id, normalizedID
 	// only the page's display ID proves the requested release.
 	target := id
 	var verified []string
-	for _, clean := range order {
-		c := byClean[clean]
+	for _, contentID := range order {
+		c := byContentID[contentID]
 		status, err := s.verifyCandidateDisplayID(ctx, target, c.urls)
 		if err != nil {
 			return "", fmt.Errorf("DMM: remaster display verification for %s: %w", id, err)
 		}
 		if status == displayVerified {
-			verified = append(verified, clean)
+			verified = append(verified, contentID)
 		}
 	}
 	if len(verified) == 1 {
-		resolved := byClean[verified[0]].contentID
+		resolved := byContentID[verified[0]].contentID
 		s.cacheContentID(ctx, normalizedID, resolved)
 		return resolved, nil
 	}

@@ -9,6 +9,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestResolveRemasterContentIDKeepsPrefixDistinctCandidates(t *testing.T) {
+	s, _ := newRemasterTestScraper(t)
+	rt := &remasterRoundTripper{serve: func(u string) (int, string) {
+		switch {
+		case strings.Contains(u, "/search/="):
+			return 200, `<a href="/mono/dvd/-/detail/=/cid=1rct00156h/">first prefix</a>` +
+				`<a href="/mono/dvd/-/detail/=/cid=9rct00156h/">second prefix</a>`
+		case strings.Contains(u, "cid=1rct00156h"):
+			return 200, `<table><tr><td>品番：</td><td>RCT-999-HD</td></tr></table>`
+		case strings.Contains(u, "cid=9rct00156h"):
+			return 200, `<table><tr><td>品番：</td><td>RCT-156-HD</td></tr></table>`
+		}
+		return 404, ""
+	}}
+	s.client.SetTransport(rt)
+
+	cid, err := s.ResolveContentIDCtx(context.Background(), "RCT-156H")
+	require.NoError(t, err)
+	assert.Equal(t, "9rct00156h", cid)
+}
+
 func TestRemasterVerificationDeduplicatesURLs(t *testing.T) {
 	for _, browser := range []bool{false, true} {
 		t.Run(map[bool]string{false: "http", true: "browser"}[browser], func(t *testing.T) {
