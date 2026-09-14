@@ -691,7 +691,7 @@ func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error
 			continue
 		}
 		id := movie.Credits[i].ActressID
-		if a, ok := resolvedById[id]; ok {
+		if a, ok := resolvedById[id]; ok && a.Verified {
 			projections = append(projections, a)
 		}
 	}

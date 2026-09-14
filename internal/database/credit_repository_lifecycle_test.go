@@ -183,6 +183,61 @@ func TestImportUpsertMatchesDMMBackedCandidateByUniqueName(t *testing.T) {
 	require.Equal(t, candidate.ID, storedCredit.ActressID)
 }
 
+func TestImportUpsertIDLookupError(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := NewActressRepository(db)
+	injectDatabaseCallbackError(t, db, "query", "actresses", 1)
+	require.Error(t, repo.ImportUpsert(context.Background(), &models.Actress{ID: 999999, FirstName: "Name"}))
+}
+
+func TestImportUpsertMatchesVerifiedDMMlessIdentityForDMMID(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := NewActressRepository(db)
+	existing := models.Actress{FirstName: "Same", LastName: "Person", Verified: true, Origin: ActressOriginUser}
+	require.NoError(t, repo.Create(context.Background(), &existing))
+
+	incoming := models.Actress{DMMID: 987665, FirstName: "Same", LastName: "Person"}
+	require.NoError(t, repo.ImportUpsert(context.Background(), &incoming))
+	require.Equal(t, existing.ID, incoming.ID)
+
+	stored, err := repo.FindByID(context.Background(), existing.ID)
+	require.NoError(t, err)
+	require.Equal(t, 0, stored.DMMID)
+}
+
+func TestImportUpsertDoesNotMergeDMMBackedHomonym(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := NewActressRepository(db)
+	existing := models.Actress{DMMID: 987660, FirstName: "Same", LastName: "Person", Verified: true, Origin: ActressOriginUser}
+	require.NoError(t, repo.Create(context.Background(), &existing))
+
+	incoming := models.Actress{DMMID: 987661, FirstName: "Same", LastName: "Person"}
+	require.NoError(t, repo.ImportUpsert(context.Background(), &incoming))
+	require.NotEqual(t, existing.ID, incoming.ID)
+	require.Equal(t, 987661, incoming.DMMID)
+
+	stored, err := repo.FindByID(context.Background(), existing.ID)
+	require.NoError(t, err)
+	require.Equal(t, 987660, stored.DMMID)
+}
+
+func TestImportUpsertMatchesByExistingIDBeforeName(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := NewActressRepository(db)
+	existing := models.Actress{DMMID: 987670, FirstName: "Original", LastName: "Name", Verified: true, Origin: ActressOriginUser}
+	require.NoError(t, repo.Create(context.Background(), &existing))
+
+	incoming := models.Actress{ID: existing.ID, FirstName: "Edited", LastName: "Names"}
+	require.NoError(t, repo.ImportUpsert(context.Background(), &incoming))
+	require.Equal(t, existing.ID, incoming.ID)
+	require.Equal(t, existing.DMMID, incoming.DMMID)
+
+	stored, err := repo.FindByID(context.Background(), existing.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Original", stored.FirstName)
+	require.Equal(t, "Name", stored.LastName)
+}
+
 func TestImportUpsertLeavesAmbiguousDMMBackedCandidatesUnmatched(t *testing.T) {
 	db := newCreditTestDB(t)
 	repo := NewActressRepository(db)

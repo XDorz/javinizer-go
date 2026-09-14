@@ -657,7 +657,7 @@ func TestImportActressRecords_LookupError(t *testing.T) {
 	assert.Equal(t, 1, errorsCount)
 }
 
-func TestImportActressRecords_UpsertError(t *testing.T) {
+func TestImportActressRecords_MatchesExistingID(t *testing.T) {
 	db, err := database.New(&database.Config{Type: "sqlite", DSN: ":memory:", LogLevel: "silent"})
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
@@ -667,9 +667,9 @@ func TestImportActressRecords_UpsertError(t *testing.T) {
 	require.NoError(t, repo.Create(context.Background(), existing))
 
 	imported, skipped, errorsCount := importActressRecords(context.Background(), repo, []models.Actress{{ID: 1, DMMID: 222, FirstName: "New", JapaneseName: "new"}})
-	assert.Zero(t, imported)
+	assert.Equal(t, 1, imported)
 	assert.Zero(t, skipped)
-	assert.Equal(t, 1, errorsCount)
+	assert.Zero(t, errorsCount)
 }
 
 func TestRunActressImport_NoJapaneseNameNoID(t *testing.T) {

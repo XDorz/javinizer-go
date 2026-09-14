@@ -503,6 +503,16 @@ func (r *ActressRepository) ImportUpsert(ctx context.Context, incoming *models.A
 }
 
 func (r *ActressRepository) findImportMatch(ctx context.Context, incoming *models.Actress) (*models.Actress, error) {
+	if incoming.ID > 0 {
+		var found models.Actress
+		err := r.GetDB().WithContext(ctx).First(&found, "id = ?", incoming.ID).Error
+		if err == nil {
+			return &found, nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, wrapDBErr("find", fmt.Sprintf("import match id %d", incoming.ID), err)
+		}
+	}
 	if incoming.DMMID > 0 {
 		var found models.Actress
 		err := r.GetDB().WithContext(ctx).First(&found, "dmm_id = ?", incoming.DMMID).Error
@@ -516,6 +526,15 @@ func (r *ActressRepository) findImportMatch(ctx context.Context, incoming *model
 	matches, err := r.FindVerifiedByExactName(ctx, incoming.JapaneseName, incoming.FirstName, incoming.LastName)
 	if err != nil {
 		return nil, err
+	}
+	if incoming.DMMID > 0 {
+		dmmLessMatches := make([]models.Actress, 0, len(matches))
+		for i := range matches {
+			if matches[i].DMMID <= 0 {
+				dmmLessMatches = append(dmmLessMatches, matches[i])
+			}
+		}
+		matches = dmmLessMatches
 	}
 	if len(matches) >= 1 {
 		return &matches[0], nil
