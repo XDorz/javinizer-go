@@ -172,7 +172,7 @@ func TestMatchFile_UnknownCodecTagsAfterRemaster(t *testing.T) {
 	m, err := NewMatcher(&Config{})
 	require.NoError(t, err)
 
-	for _, name := range []string{"ABC.123.HD VVC1.mkv", "ABC.123.HD AVS3.mkv"} {
+	for _, name := range []string{"ABC.123.HD VVC1.mkv", "ABC.123.HD AVS3.mkv", "FHD 1080 HD x265 ABC-123-HD.mkv"} {
 		t.Run(name, func(t *testing.T) {
 			got := matchOne(t, m, name)
 			require.NotNil(t, got)

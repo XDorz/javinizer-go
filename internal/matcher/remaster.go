@@ -58,16 +58,20 @@ func normalizeFusedRemasterFilename(name string, builtinPattern *regexp.Regexp) 
 	remainder := remasterPartLabelRegex.ReplaceAllString(name[m[1]:], "")
 	// Compact codec/resolution tags (x265, FHD720) also match the trailing id
 	// alternatives; they are tags, not replacement ids, so veto the suppression.
-	if candidate := trailingCatalogIDRegex.FindString(remainder); candidate != "" && !trailingQualityTagRegex.MatchString(candidate) {
-		replacement := name[m[1]:]
-		if normalized := normalizeFusedRemasterFilename(replacement, builtinPattern); normalized != "" {
+	for _, candidateIndex := range trailingCatalogIDRegex.FindAllStringIndex(remainder, -1) {
+		candidate := remainder[candidateIndex[0]:candidateIndex[1]]
+		if trailingQualityTagRegex.MatchString(candidate) {
+			continue
+		}
+		candidateRemainder := remainder[candidateIndex[0]:]
+		if normalized := normalizeFusedRemasterFilename(candidateRemainder, builtinPattern); normalized != "" {
 			return normalized
 		}
-		if builtinPattern.FindStringIndex(replacement) != nil {
-			return replacement
+		if builtinPattern.FindStringIndex(candidate) != nil {
+			return candidateRemainder
 		}
-		if idText, _ := contentIDPrefixMatch(replacement); idText != "" {
-			return replacement
+		if idText, _ := contentIDPrefixMatch(candidate); idText != "" {
+			return candidateRemainder
 		}
 	}
 	// A prefix-free compact t28 tail with a three-digit number reads as the

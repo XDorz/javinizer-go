@@ -61,6 +61,7 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 		// Codec tags trailing the real id must not keep the leading quality
 		// phrase alive or shadow the stronger raw content id.
 		{"FHD 1080 HD ABC-123-HD x265.mkv", "ABC-123H"},
+		{"FHD 1080 HD x265 ABC-123-HD.mkv", "ABC-123H"},
 		{"QUALITY 1080 HD 1rct00156h x265.mkv", "1RCT00156H"},
 		// The marker suffix comes after the ACTUAL match occurrence, not the
 		// first textual occurrence of the id inside an ineligible token.
