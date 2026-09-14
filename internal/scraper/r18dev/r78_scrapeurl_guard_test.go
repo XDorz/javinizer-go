@@ -43,6 +43,25 @@ func TestScrapeURL_RemasterGuard(t *testing.T) {
 		assert.NotEqual(t, "IPX-535H", res.ID, "folded conflicting identity must not publish")
 	})
 
+	t.Run("conflicting display URL id is rejected", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"content_id": "1rct00157h",
+				"dvd_id": "RCT-157-HD",
+				"title_en": "Stale remaster row",
+				"actresses": [],
+				"categories": []
+			}`))
+		}))
+		defer server.Close()
+		s := newR18TestScraper(server, true, "en")
+		res, err := s.ScrapeURL(context.Background(), "https://r18.dev/videos/vod/movies/detail/-/id=RCT-156-HD/json")
+		assert.Error(t, err)
+		assert.Nil(t, res)
+	})
+
 	t.Run("consistent display id publishes", func(t *testing.T) {
 		server := serve("IPX-535ZH")
 		defer server.Close()
