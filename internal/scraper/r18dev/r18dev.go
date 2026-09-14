@@ -999,7 +999,8 @@ func (s *scraper) resolveByContentIDVariations(ctx context.Context, id string) (
 			if !strings.Contains(contentType, "text/html") {
 				matched := variationCoreMatches(resp.Body(), normalizedDVDID)
 				if foldedMarker != "" {
-					matched = markerVariationAccept(resp.Body(), id, foldedMarker, markerSeries)
+					matched = responseContentIDMatchesVariation(resp.Body(), variation) &&
+						markerVariationAccept(resp.Body(), id, foldedMarker, markerSeries)
 				}
 				if matched {
 					logging.Debugf("R18: ✓ Content-id variation %s resolved for %s", variation, id)

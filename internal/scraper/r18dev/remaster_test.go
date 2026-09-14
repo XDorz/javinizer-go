@@ -157,12 +157,12 @@ func TestRemaster_FuzzyFallbackRejectsBase_FinalFetchGuarded(t *testing.T) {
 	assert.Nil(t, result)
 }
 
-func TestRemaster_VariationProbeIdentityIsServerOwned(t *testing.T) {
+func TestRemaster_VariationProbeIdentityMustMatchCandidate(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		path := r.URL.Path
 		switch {
-		case strings.Contains(path, "combined=dv818ai"):
+		case strings.Contains(path, "combined=dv00818ai"):
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"content_id": "dv00899ai", "dvd_id": null, "title_en": "AI Remaster"}`))
 			return
@@ -176,9 +176,8 @@ func TestRemaster_VariationProbeIdentityIsServerOwned(t *testing.T) {
 
 	s := newR18TestScraper(server, true, "en")
 	result, err := s.Search(context.Background(), "DV-818AI")
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	assert.Equal(t, "dv00899ai", result.ContentID, "identity comes verbatim from the server, not the constructed probe")
+	require.Error(t, err)
+	assert.Nil(t, result)
 }
 
 func TestRemaster_BaseQueryStillResolvesBase(t *testing.T) {

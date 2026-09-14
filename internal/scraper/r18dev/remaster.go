@@ -230,6 +230,14 @@ func cidRemasterSuffix(id string) string {
 	return ez
 }
 
+func responseContentIDMatchesVariation(body []byte, variation string) bool {
+	var data contentIDLookupResponse
+	if err := json.Unmarshal(body, &data); err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(data.ContentID), strings.TrimSpace(variation))
+}
+
 func markerVariationAccept(body []byte, queryID, foldedMarker, series string) bool {
 	var data contentIDLookupResponse
 	if err := json.Unmarshal(body, &data); err != nil {
