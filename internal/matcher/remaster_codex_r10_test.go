@@ -71,6 +71,8 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 		{"QUALITY 1080 HD AB123.mkv", "AB123"},
 		{"QUALITY 1080 HD ABC123.mkv", "ABC123"},
 		{"QUALITY 1080 HD A123.mkv", "A123"},
+		{"IPX535 10bit420.mkv", "IPX535"},
+		{"IPX535 5point1.mkv", "IPX535"},
 		{"QUALITY 1080 HD ABCDEFGHI.123.HD.mkv", "ABCDEFGHI-123H"},
 		{"birthday2024.mkv", ""},
 		{"documentary2024.mkv", ""},
@@ -122,4 +124,12 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 
 	assert.Nil(t, matchOne(t, m, "birthday2024.mkv"))
 	assert.Nil(t, matchOne(t, m, "documentary2024.mkv"))
+
+	fileResult = matchOne(t, m, "IPX535 10bit420.mkv")
+	require.NotNil(t, fileResult)
+	assert.Equal(t, "IPX535", fileResult.ID)
+
+	fileResult = matchOne(t, m, "IPX535 5point1.mkv")
+	require.NotNil(t, fileResult)
+	assert.Equal(t, "IPX535", fileResult.ID)
 }
