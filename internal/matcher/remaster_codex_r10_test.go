@@ -47,6 +47,7 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 		{"ABC.123.HD PRORES422.mkv", "ABC-123H"},
 		{"ABC.123.HD YUV420.mkv", "ABC-123H"},
 		{"ABC.123.HD RGB444.mkv", "ABC-123H"},
+		{"ABC.123.HD P010.mkv", "ABC-123H"},
 		// Numbered Dolby audio tags (DDP5.1, EAC3) are tags too.
 		{"ABC.123.HD DDP5.1.mkv", "ABC-123H"},
 		{"ABC.123.HD EAC3.mkv", "ABC-123H"},
@@ -110,6 +111,10 @@ func TestRemasterMarkerResolutionAndQualityLabels(t *testing.T) {
 	assert.Equal(t, "ABC-123H", fileResult.ID)
 
 	fileResult = matchOne(t, m, "ABC.123.HD RGB444.mkv")
+	require.NotNil(t, fileResult)
+	assert.Equal(t, "ABC-123H", fileResult.ID)
+
+	fileResult = matchOne(t, m, "ABC.123.HD P010.mkv")
 	require.NotNil(t, fileResult)
 	assert.Equal(t, "ABC-123H", fileResult.ID)
 }
