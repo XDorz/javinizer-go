@@ -190,7 +190,11 @@ func (s *scraper) ScrapeURL(ctx context.Context, urlStr string) (*models.Scraper
 		return nil, fmt.Errorf("failed to parse R18.dev response (preview: %s): %w", bodyPreview, err)
 	}
 
-	return s.parseResponse(ctx, &data, urlStr)
+	res, err := s.parseResponse(ctx, &data, urlStr)
+	if err == nil {
+		res, err = guardRemasterResult(id, res)
+	}
+	return res, err
 }
 
 // ResolveDownloadProxyForHost declares R18.dev-owned media hosts for downloader proxy routing.
@@ -498,12 +502,8 @@ func (s *scraper) Search(ctx context.Context, id string) (*models.ScraperResult,
 	if resolvedURL, ok := resolver.ResolveURL(ctx, id); ok {
 		finalURL = resolvedURL
 	} else {
-		// Fallback: use normalized ID URL
-		var err error
-		finalURL, err = s.getURLCtx(ctx, id)
-		if err != nil {
-			return nil, err
-		}
+		// Fallback: use normalized ID URL (normalization is total; it cannot error)
+		finalURL, _ = s.getURLCtx(ctx, id)
 		logging.Debugf("R18: Using normalized ID URL (no content-id found): %s", finalURL)
 	}
 
