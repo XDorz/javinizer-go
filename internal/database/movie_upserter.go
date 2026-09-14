@@ -720,11 +720,22 @@ func (u *MovieUpserter) recordFieldCollisionsTx(tx *gorm.DB, collisionRepo *Cred
 	conflicts := make([]fieldConflict, 0, 2)
 	reportedName := credit.CreditedName
 	if reportedName == "" {
+		reportedName = credit.CreditedJapaneseName
+	}
+	if reportedName == "" {
 		reportedName = credit.Scraped.FullName()
 	}
+	reportedNameKey := models.NormalizeActressNameKey(reportedName)
 	canonicalName := resolved.FullName()
-	if strings.TrimSpace(reportedName) != "" && strings.TrimSpace(canonicalName) != "" &&
-		models.NormalizeActressNameKey(reportedName) != models.NormalizeActressNameKey(canonicalName) {
+	canonicalNameMatches := false
+	for _, canonical := range []string{canonicalName, resolved.JapaneseName} {
+		canonicalKey := models.NormalizeActressNameKey(canonical)
+		if reportedNameKey != "" && canonicalKey != "" && reportedNameKey == canonicalKey {
+			canonicalNameMatches = true
+			break
+		}
+	}
+	if reportedNameKey != "" && !canonicalNameMatches {
 		conflicts = append(conflicts, fieldConflict{field: models.CreditFieldCreditedName, reported: reportedName, canonical: canonicalName})
 	}
 	reportedThumb := credit.ReportedThumbURL

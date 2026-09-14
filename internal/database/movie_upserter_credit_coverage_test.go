@@ -171,6 +171,31 @@ func TestRecordFieldCollisionsTxBranches(t *testing.T) {
 	require.NoError(t, u.recordFieldCollisionsTx(db.DB, collisions, aliases, &credit, &actress, CollisionPolicyAutoKeep, nil))
 }
 
+func TestRecordFieldCollisionsMatchesCanonicalJapaneseName(t *testing.T) {
+	db := newCreditTestDB(t)
+	u := creditCoverageUpserter(db)
+	movie := creditCoverageMovie(t, db, "field-japanese-match")
+	actress := models.Actress{
+		FirstName:    "Sakura",
+		LastName:     "Yamada",
+		JapaneseName: "山田さくら",
+		Verified:     true,
+		Origin:       ActressOriginUser,
+	}
+	require.NoError(t, db.Create(&actress).Error)
+	credit := models.MovieCredit{
+		MovieContentID:       movie.ContentID,
+		ActressID:            actress.ID,
+		CreditedJapaneseName: "山田さくら",
+	}
+	require.NoError(t, db.Create(&credit).Error)
+	collisions, aliases := creditCoverageRepos(db)
+	require.NoError(t, u.recordFieldCollisionsTx(db.DB, collisions, aliases, &credit, &actress, CollisionPolicyBlock, nil))
+	open, err := collisions.ListOpenByMovie(t.Context(), movie.ContentID)
+	require.NoError(t, err)
+	require.Empty(t, open)
+}
+
 func TestRecordFieldCollisionsRetiresSuperseded(t *testing.T) {
 	db := newCreditTestDB(t)
 	u := creditCoverageUpserter(db)

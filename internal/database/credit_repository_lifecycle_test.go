@@ -107,6 +107,38 @@ func TestCreditRepositoriesCancellationErrors(t *testing.T) {
 	require.Error(t, c.ResolveTx(tx, collision.ID, "keep_identity"))
 }
 
+func TestImportUpsertPromotesDMMlessCandidateByNameKey(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := NewActressRepository(db)
+	candidate := models.Actress{
+		FirstName: "NameOnly",
+		LastName:  "Candidate",
+		Verified:  false,
+		Origin:    ActressOriginScrape,
+		NameKey:   models.NormalizeActressNameKey("Candidate NameOnly"),
+	}
+	require.NoError(t, repo.Create(context.Background(), &candidate))
+
+	incoming := models.Actress{FirstName: "NameOnly", LastName: "Candidate"}
+	require.NoError(t, repo.ImportUpsert(context.Background(), &incoming))
+	require.Equal(t, candidate.ID, incoming.ID)
+	require.True(t, incoming.Verified)
+	require.Equal(t, ActressOriginImport, incoming.Origin)
+
+	stored, err := repo.FindByID(context.Background(), candidate.ID)
+	require.NoError(t, err)
+	require.True(t, stored.Verified)
+	require.Equal(t, ActressOriginImport, stored.Origin)
+}
+
+func TestImportUpsertCandidateLookupError(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := NewActressRepository(db)
+	injectDatabaseCallbackError(t, db, "query", "actresses", 2)
+	incoming := models.Actress{FirstName: "Candidate", LastName: "Only"}
+	require.Error(t, repo.ImportUpsert(context.Background(), &incoming))
+}
+
 func TestIdentityCatalogOwnershipAndImports(t *testing.T) {
 	db, service, credit, _ := collisionFixture(t)
 	r := service.Actresses

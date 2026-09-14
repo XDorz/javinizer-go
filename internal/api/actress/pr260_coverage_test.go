@@ -103,6 +103,22 @@ func TestPromoteCandidateRepositoryFailuresPR260(t *testing.T) {
 	}
 }
 
+func TestImportActresses_ImportUpsertError(t *testing.T) {
+	repo := mocks.NewMockActressRepositoryInterface(t)
+	repo.EXPECT().FindByJapaneseNameAndDMMID(mock.Anything, "", 1).Return(nil, database.ErrNotFound)
+	repo.EXPECT().ImportUpsert(mock.Anything, mock.AnythingOfType("*models.Actress")).Return(errors.New("import failed"))
+
+	router := gin.New()
+	router.POST("/actresses/import", importActresses(ActressDeps{ContentRepos: database.ContentRepos{ActressRepo: repo}}))
+	request := httptest.NewRequest(http.MethodPost, "/actresses/import", bytes.NewBufferString(`{"actresses":[{"dmm_id":1,"first_name":"Name"}]}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusOK, response.Code)
+	assert.Contains(t, response.Body.String(), `"errors":1`)
+}
+
 func TestResolveCollisionMissingCollisionPR260(t *testing.T) {
 	db, err := database.New(&database.Config{Type: "sqlite", DSN: ":memory:", LogLevel: "silent"})
 	require.NoError(t, err)

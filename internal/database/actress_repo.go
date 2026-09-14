@@ -513,6 +513,15 @@ func (r *ActressRepository) findImportMatch(ctx context.Context, incoming *model
 	if len(matches) >= 1 {
 		return &matches[0], nil
 	}
+	if incoming.DMMID <= 0 {
+		candidate, candidateErr := findCandidateByNameKeyTx(r.GetDB().WithContext(ctx), actressNameKey(incoming))
+		if candidateErr == nil {
+			return candidate, nil
+		}
+		if !errors.Is(candidateErr, gorm.ErrRecordNotFound) {
+			return nil, wrapDBErr("find", fmt.Sprintf("import candidate %s", incoming.FullName()), candidateErr)
+		}
+	}
 	return nil, nil
 }
 
