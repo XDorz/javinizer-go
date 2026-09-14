@@ -152,6 +152,51 @@ func TestApplyPhaseCollisionCountsBlockOnlyOpenMoviesPR260(t *testing.T) {
 		"blocked.mp4": {Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "blocked", ContentID: "blocked"}},
 		"clear.mp4":   {Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "clear", ContentID: "clear"}},
 	}
-	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{Destination: "/output"})
+	var organized, failed int
+	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
+		Destination: "/output",
+		OnPhaseComplete: func(org, fail int) {
+			organized, failed = org, fail
+		},
+	})
 	assert.Equal(t, 1, wf.getApplyCalled())
+	assert.Equal(t, 1, organized)
+	assert.Equal(t, 1, failed)
+	lifecycle := inputs.Lifecycle.(*stubLifecycle)
+	assert.True(t, lifecycle.completed)
+	assert.False(t, lifecycle.organized)
+}
+
+func TestApplyPhaseRefreshesPersistedCreditsPR260(t *testing.T) {
+	repo := mocks.NewMockMovieRepositoryInterface(t)
+	canonical := models.Actress{ID: 23, DMMID: 9023, FirstName: "Canonical", LastName: "Actress", Verified: true}
+	persisted := &models.Movie{
+		ID:        "movie-db-id",
+		ContentID: "refresh-001",
+		Actresses: []models.Actress{canonical},
+		Credits:   []models.MovieCredit{{ActressID: canonical.ID, Actress: &canonical, CreditedName: "Canonical Actress"}},
+	}
+	repo.EXPECT().FindByID(mock.Anything, "movie-db-id").Return(persisted, nil)
+	wf := &stubApplyWorkflow{applyResult: &workflow.ApplyResult{Movie: &models.Movie{ID: "movie-db-id"}}}
+	inputs := makeApplyInputs(wf)
+	inputs.MovieRepo = repo
+	inputs.Results["refresh.mp4"] = &resultstore.MovieResult{
+		Status: models.JobStatusCompleted,
+		Movie: &models.Movie{
+			ID:        "movie-db-id",
+			ContentID: "refresh-001",
+			Actresses: []models.Actress{{ID: 7, FirstName: "Stale"}},
+			Credits:   []models.MovieCredit{{ActressID: 7, CreditedName: "Stale"}},
+		},
+	}
+
+	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{Destination: "/output"})
+
+	cmd := wf.getLastCmd()
+	require.NotNil(t, cmd.Movie)
+	require.Len(t, cmd.Movie.Actresses, 1)
+	require.Len(t, cmd.Movie.Credits, 1)
+	assert.Equal(t, canonical.ID, cmd.Movie.Actresses[0].ID)
+	assert.Equal(t, canonical.ID, cmd.Movie.Credits[0].ActressID)
+	assert.Equal(t, "Canonical Actress", cmd.Movie.Credits[0].CreditedName)
 }

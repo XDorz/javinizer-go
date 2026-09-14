@@ -588,11 +588,15 @@ func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error
 
 		scraped := credit.Scraped
 		if scraped.JapaneseName == "" && scraped.FirstName == "" && scraped.LastName == "" && scraped.DMMID == 0 {
-			scraped = models.Actress{
-				DMMID:        resolvedDMMIDFromCredit(credit),
-				FirstName:    scrapedFirstName(credit),
-				LastName:     scrapedLastName(credit),
-				JapaneseName: credit.CreditedJapaneseName,
+			if credit.Actress != nil {
+				scraped = *credit.Actress
+			} else {
+				scraped = models.Actress{
+					DMMID:        resolvedDMMIDFromCredit(credit),
+					FirstName:    scrapedFirstName(credit),
+					LastName:     scrapedLastName(credit),
+					JapaneseName: credit.CreditedJapaneseName,
+				}
 			}
 		}
 

@@ -494,6 +494,37 @@ func TestPR260ReassignAndTransferMutationErrors(t *testing.T) {
 		injectDatabaseCallbackError(t, db, "query", "credit_collisions", 1)
 		require.Error(t, reassignCreditTx(db.DB, &source, target.ID))
 	})
+	t.Run("direct credit update", func(t *testing.T) {
+		db, _, source, _ := collisionFixture(t)
+		target := models.Actress{FirstName: "Target", Verified: true}
+		require.NoError(t, db.Create(&target).Error)
+		injectDatabaseCallbackError(t, db, "update", "movie_credits", 1)
+		require.Error(t, reassignCreditTx(db.DB, &source, target.ID))
+	})
+	t.Run("merged source credit delete", func(t *testing.T) {
+		db, _, source, _ := collisionFixture(t)
+		target := models.Actress{FirstName: "Target", Verified: true}
+		require.NoError(t, db.Create(&target).Error)
+		require.NoError(t, db.Create(&models.MovieCredit{MovieContentID: source.MovieContentID, ActressID: target.ID}).Error)
+		injectDatabaseCallbackError(t, db, "delete", "movie_credits", 1)
+		require.Error(t, reassignCreditTx(db.DB, &source, target.ID))
+	})
+	t.Run("legacy association insert", func(t *testing.T) {
+		db, _, source, _ := collisionFixture(t)
+		target := models.Actress{FirstName: "Target", Verified: true}
+		require.NoError(t, db.Create(&target).Error)
+		require.NoError(t, db.Migrator().DropTable("movie_actresses"))
+		require.Error(t, reassignCreditTx(db.DB, &source, target.ID))
+	})
+	t.Run("legacy association delete", func(t *testing.T) {
+		db, _, source, _ := collisionFixture(t)
+		target := models.Actress{FirstName: "Target", Verified: true}
+		require.NoError(t, db.Create(&target).Error)
+		movie := models.Movie{ContentID: source.MovieContentID}
+		require.NoError(t, db.Model(&movie).Association("Actresses").Replace([]models.Actress{{ID: source.ActressID}}))
+		require.NoError(t, db.Exec("CREATE TRIGGER pr260_fail_legacy_delete BEFORE DELETE ON movie_actresses BEGIN SELECT RAISE(ABORT, 'injected database error'); END").Error)
+		require.Error(t, reassignCreditTx(db.DB, &source, target.ID))
+	})
 	for _, operation := range []string{"update", "delete"} {
 		t.Run("merged collision "+operation, func(t *testing.T) {
 			db, _, source, sourceCollision := collisionFixture(t)

@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -279,6 +280,46 @@ func recoverRunPanic(inputs applyPhaseInputs, r any) {
 	inputs.Lifecycle.MarkFailed()
 }
 
+func refreshApplyMovieIdentity(ctx context.Context, repo database.MovieRepositoryInterface, results map[string]*resultstore.MovieResult) {
+	if repo == nil {
+		return
+	}
+	persistedByContentID := make(map[string]*models.Movie)
+	for _, fileResult := range results {
+		if fileResult == nil || fileResult.Movie == nil {
+			continue
+		}
+		contentID := strings.TrimSpace(fileResult.Movie.ContentID)
+		movieID := strings.TrimSpace(fileResult.Movie.ID)
+		if contentID == "" || movieID == "" {
+			continue
+		}
+		if _, ok := persistedByContentID[contentID]; ok {
+			continue
+		}
+		persisted, err := repo.FindByID(ctx, movieID)
+		if err != nil {
+			logging.Warnf("[Apply] failed to refresh persisted movie %s: %v", movieID, err)
+			continue
+		}
+		if persisted != nil {
+			persistedByContentID[contentID] = persisted
+		}
+	}
+	for _, fileResult := range results {
+		if fileResult == nil || fileResult.Movie == nil {
+			continue
+		}
+		persisted := persistedByContentID[strings.TrimSpace(fileResult.Movie.ContentID)]
+		if persisted == nil {
+			continue
+		}
+		refreshed := persisted.Clone()
+		fileResult.Movie.Actresses = refreshed.Actresses
+		fileResult.Movie.Credits = refreshed.Credits
+	}
+}
+
 // Run executes the apply phase: setup errgroup → iterate files → dispatch
 // applyFile → collect outcomes → track results → report status.
 func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg ApplyPhaseConfig) {
@@ -297,6 +338,8 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 		}
 	}()
 
+	refreshApplyMovieIdentity(ctx, inputs.MovieRepo, inputs.Results)
+
 	excludedSnapshot := make(map[string]bool, len(inputs.Results))
 	for filePath := range inputs.Results {
 		excludedSnapshot[filePath] = inputs.Excluded[filePath]
@@ -313,7 +356,6 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 		retryPaths[filePath] = struct{}{}
 	}
 	blockedCollisions := map[string]bool{}
-	collisionGateUnavailable := false
 	if inputs.CollisionRepo != nil {
 		movieIDs := make([]string, 0, len(inputs.Results))
 		seen := make(map[string]bool, len(inputs.Results))
@@ -326,7 +368,6 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 		}
 		counts, err := inputs.CollisionRepo.CountOpenByMovieBatch(ctx, movieIDs)
 		if err != nil {
-			collisionGateUnavailable = true
 			logging.Errorf("[Apply] collision gate lookup failed; failing closed for this run: %v", err)
 			for filePath, fileResult := range inputs.Results {
 				if fileResult.Movie != nil && fileResult.Movie.ContentID != "" {
@@ -368,9 +409,7 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 			continue
 		}
 		if blockedCollisions[fileResult.Movie.ContentID] {
-			if collisionGateUnavailable {
-				collisionGateFailures[filePath] = struct{}{}
-			}
+			collisionGateFailures[filePath] = struct{}{}
 			continue
 		}
 		items = append(items, applyItem{

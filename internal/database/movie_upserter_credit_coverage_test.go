@@ -50,6 +50,27 @@ func TestMovieUpserterCreditHelpers(t *testing.T) {
 	require.Equal(t, uint(77), movie.Credits[0].ID)
 }
 
+func TestPersistCreditsTxUsesLoadedActressIdentity(t *testing.T) {
+	db := newCreditTestDB(t)
+	u := creditCoverageUpserter(db)
+	movie := creditCoverageMovie(t, db, "credit-loaded-identity")
+	canonical := models.Actress{DMMID: 7401, FirstName: "Canonical", LastName: "Identity", Verified: true, Origin: ActressOriginUser}
+	require.NoError(t, db.Create(&canonical).Error)
+	movie.Credits = []models.MovieCredit{{
+		MovieContentID: movie.ContentID,
+		ActressID:      canonical.ID,
+		Actress:        &canonical,
+	}}
+
+	require.NoError(t, u.persistCreditsTx(db.DB, movie))
+
+	require.Len(t, movie.Credits, 1)
+	require.Equal(t, canonical.ID, movie.Credits[0].ActressID)
+	var saved models.MovieCredit
+	require.NoError(t, db.First(&saved, movie.Credits[0].ID).Error)
+	require.Equal(t, canonical.ID, saved.ActressID)
+}
+
 func TestPersistCreditsTxSuccessBranches(t *testing.T) {
 	db := newCreditTestDB(t)
 	u := creditCoverageUpserter(db)

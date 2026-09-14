@@ -147,6 +147,7 @@ type applyPhaseInputs struct {
 	// The marker gate must never block when poster output is off.
 	PosterDisabled bool
 	WF             workflow.WorkflowInterface
+	MovieRepo      database.MovieRepositoryInterface
 
 	// Current state snapshot (frozen at construction, not live)
 	Results     map[string]*resultstore.MovieResult

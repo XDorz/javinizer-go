@@ -22,6 +22,46 @@ func collisionFixture(t *testing.T) (*DB, *CollisionService, models.MovieCredit,
 	return db, NewCollisionService(db), credit, collision
 }
 
+func TestCollisionServiceReassignSynchronizesLegacyActressAssociation(t *testing.T) {
+	t.Run("direct", func(t *testing.T) {
+		db, service, credit, collision := collisionFixture(t)
+		target := models.Actress{FirstName: "Target", Verified: true, Origin: ActressOriginUser}
+		require.NoError(t, db.Create(&target).Error)
+		movie := models.Movie{ContentID: credit.MovieContentID}
+		require.NoError(t, db.Model(&movie).Association("Actresses").Replace([]models.Actress{{ID: credit.ActressID}}))
+
+		_, err := service.Resolve(context.Background(), collision.ID, models.CollisionResolutionReassign, target.ID)
+		require.NoError(t, err)
+
+		var ids []uint
+		require.NoError(t, db.Table("movie_actresses").Where("movie_content_id = ?", credit.MovieContentID).Pluck("actress_id", &ids).Error)
+		require.ElementsMatch(t, []uint{target.ID}, ids)
+		require.NoError(t, db.First(&credit, credit.ID).Error)
+		require.Equal(t, target.ID, credit.ActressID)
+	})
+
+	t.Run("merge", func(t *testing.T) {
+		db, service, source, collision := collisionFixture(t)
+		target := models.Actress{FirstName: "Target", Verified: true, Origin: ActressOriginUser}
+		require.NoError(t, db.Create(&target).Error)
+		targetCredit := models.MovieCredit{MovieContentID: source.MovieContentID, ActressID: target.ID, CreditedName: "Target"}
+		require.NoError(t, db.Create(&targetCredit).Error)
+		movie := models.Movie{ContentID: source.MovieContentID}
+		require.NoError(t, db.Model(&movie).Association("Actresses").Replace([]models.Actress{{ID: source.ActressID}, {ID: target.ID}}))
+
+		_, err := service.Resolve(context.Background(), collision.ID, models.CollisionResolutionReassign, target.ID)
+		require.NoError(t, err)
+
+		var ids []uint
+		require.NoError(t, db.Table("movie_actresses").Where("movie_content_id = ?", source.MovieContentID).Pluck("actress_id", &ids).Error)
+		require.ElementsMatch(t, []uint{target.ID}, ids)
+		var credits []models.MovieCredit
+		require.NoError(t, db.Where("movie_content_id = ?", source.MovieContentID).Find(&credits).Error)
+		require.Len(t, credits, 1)
+		require.Equal(t, target.ID, credits[0].ActressID)
+	})
+}
+
 func TestCollisionServiceResolutions(t *testing.T) {
 	cases := []struct{ name, resolution, field, reported, japanese string }{
 		{"keep name", "keep_identity", "credited_name", "Reported Person", ""},

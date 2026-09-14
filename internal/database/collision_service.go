@@ -358,6 +358,21 @@ func upsertAliasTx(tx *gorm.DB, alias *models.ActressAlias) error {
 	return nil
 }
 
+func reassignLegacyActressTx(tx *gorm.DB, movieContentID string, sourceActressID, targetActressID uint) error {
+	if err := tx.Exec(`
+		INSERT OR IGNORE INTO movie_actresses (movie_content_id, actress_id)
+		SELECT ?, ?
+		WHERE EXISTS (
+			SELECT 1 FROM movie_actresses WHERE movie_content_id = ? AND actress_id = ?
+		)`, movieContentID, targetActressID, movieContentID, sourceActressID).Error; err != nil {
+		return err
+	}
+	return tx.Exec(
+		"DELETE FROM movie_actresses WHERE movie_content_id = ? AND actress_id = ?",
+		movieContentID, sourceActressID,
+	).Error
+}
+
 func reassignCreditTx(tx *gorm.DB, credit *models.MovieCredit, targetActressID uint) error {
 	var target models.Actress
 	if err := tx.Where("id = ? AND verified = ?", targetActressID, true).First(&target).Error; err != nil {
@@ -397,12 +412,18 @@ func reassignCreditTx(tx *gorm.DB, credit *models.MovieCredit, targetActressID u
 		if err := transferCollisionsTx(tx, credit.ID, targetCredit.ID); err != nil {
 			return err
 		}
-		return tx.Where("id = ?", credit.ID).Delete(&models.MovieCredit{}).Error
+		if err := tx.Where("id = ?", credit.ID).Delete(&models.MovieCredit{}).Error; err != nil {
+			return err
+		}
+		return reassignLegacyActressTx(tx, credit.MovieContentID, credit.ActressID, targetActressID)
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
-	return tx.Model(&models.MovieCredit{}).Where("id = ?", credit.ID).Update("actress_id", targetActressID).Error
+	if err := tx.Model(&models.MovieCredit{}).Where("id = ?", credit.ID).Update("actress_id", targetActressID).Error; err != nil {
+		return err
+	}
+	return reassignLegacyActressTx(tx, credit.MovieContentID, credit.ActressID, targetActressID)
 }
 
 func transferCollisionsTx(tx *gorm.DB, fromCreditID, toCreditID uint) error {
