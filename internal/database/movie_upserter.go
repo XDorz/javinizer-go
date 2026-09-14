@@ -727,6 +727,29 @@ func resolvedDMMIDFromCredit(credit *models.MovieCredit) int {
 	return credit.Scraped.DMMID
 }
 
+func aliasMatchesCanonicalTx(tx *gorm.DB, aliasName string, resolved *models.Actress) (bool, error) {
+	var aliases []models.ActressAlias
+	if err := tx.Where("alias_name = ?", aliasName).Find(&aliases).Error; err != nil {
+		return false, wrapDBErr("find", fmt.Sprintf("actress alias %s", aliasName), err)
+	}
+	canonicalNames := []string{
+		resolved.FullName(),
+		resolved.JapaneseName,
+		resolved.LastName + " " + resolved.FirstName,
+		resolved.FirstName + " " + resolved.LastName,
+	}
+	for _, alias := range aliases {
+		aliasKey := models.NormalizeActressNameKey(alias.CanonicalName)
+		for _, canonical := range canonicalNames {
+			canonicalKey := models.NormalizeActressNameKey(canonical)
+			if aliasKey != "" && canonicalKey != "" && aliasKey == canonicalKey {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 func (u *MovieUpserter) recordFieldCollisionsTx(tx *gorm.DB, collisionRepo *CreditCollisionRepository, aliasRepo *ActressAliasRepository, credit *models.MovieCredit, resolved *models.Actress, policy CollisionPolicy, trusted map[string]bool) error {
 	type fieldConflict struct {
 		field     string
@@ -751,7 +774,15 @@ func (u *MovieUpserter) recordFieldCollisionsTx(tx *gorm.DB, collisionRepo *Cred
 			break
 		}
 	}
+	aliasNameMatches := false
 	if reportedNameKey != "" && !canonicalNameMatches {
+		var err error
+		aliasNameMatches, err = aliasMatchesCanonicalTx(tx, reportedName, resolved)
+		if err != nil {
+			return err
+		}
+	}
+	if reportedNameKey != "" && !canonicalNameMatches && !aliasNameMatches {
 		conflicts = append(conflicts, fieldConflict{field: models.CreditFieldCreditedName, reported: reportedName, canonical: canonicalName})
 	}
 	reportedThumb := credit.ReportedThumbURL

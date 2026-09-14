@@ -30,6 +30,49 @@ func creditMovie(id string, credits []models.MovieCredit) *models.Movie {
 	return m
 }
 
+func TestUpsertTxRefreshesSuppressedCreditFields(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := NewMovieCreditRepository(db)
+	actress := models.Actress{FirstName: "Credit", LastName: "Owner", Verified: true, Origin: ActressOriginUser}
+	require.NoError(t, db.Create(&actress).Error)
+	existing := models.MovieCredit{
+		MovieContentID:       "suppressed-refresh",
+		ActressID:            actress.ID,
+		CreditedName:         "Old Name",
+		CreditedJapaneseName: "旧名",
+		ReportedThumbURL:     "old-thumb",
+		Source:               "old-source",
+		Origin:               string(models.CreditOriginUser),
+		OverrideName:         "Pinned Display",
+		UserOverride:         true,
+		Suppressed:           true,
+	}
+	require.NoError(t, db.Create(&existing).Error)
+
+	incoming := models.MovieCredit{
+		MovieContentID:       existing.MovieContentID,
+		ActressID:            actress.ID,
+		CreditedName:         "New Name",
+		CreditedJapaneseName: "新名",
+		ReportedThumbURL:     "new-thumb",
+		Source:               "new-source",
+		Origin:               string(models.CreditOriginScrape),
+		OrderIndex:           4,
+	}
+	require.NoError(t, repo.UpsertTx(db.DB, &incoming))
+	require.True(t, incoming.Suppressed)
+
+	var stored models.MovieCredit
+	require.NoError(t, db.First(&stored, existing.ID).Error)
+	require.Equal(t, "New Name", stored.CreditedName)
+	require.Equal(t, "新名", stored.CreditedJapaneseName)
+	require.Equal(t, "new-thumb", stored.ReportedThumbURL)
+	require.Equal(t, "new-source", stored.Source)
+	require.True(t, stored.Suppressed)
+	require.Equal(t, "Pinned Display", stored.OverrideName)
+	require.True(t, stored.UserOverride)
+}
+
 func TestUpsertWithCredits_CreatesCandidateAndCredit(t *testing.T) {
 	db := newCreditTestDB(t)
 	repo := db.Repositories()

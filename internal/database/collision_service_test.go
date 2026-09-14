@@ -255,6 +255,16 @@ func TestCollisionServiceOverrideAndSuppression(t *testing.T) {
 	ctx := context.Background()
 	legacyMovie := models.Movie{ContentID: credit.MovieContentID}
 	require.NoError(t, db.Model(&legacyMovie).Association("Actresses").Replace([]models.Actress{{ID: credit.ActressID}}))
+	historical := models.CreditCollision{
+		CreditID:       credit.ID,
+		MovieContentID: credit.MovieContentID,
+		Field:          models.CreditFieldCreditedName,
+		ReportedValue:  "Older Reported Person",
+		CanonicalValue: "Original Truth",
+		Status:         models.CollisionStatusResolved,
+		Resolution:     models.CollisionResolutionByRemoval,
+	}
+	require.NoError(t, db.Create(&historical).Error)
 	require.ErrorIs(t, service.UpdateCreditOverride(ctx, 9999, "Missing", true), ErrNotFound)
 	require.ErrorIs(t, service.SetCreditSuppressed(ctx, 9999, true), ErrNotFound)
 	require.NoError(t, service.UpdateCreditOverride(ctx, credit.ID, "User Name", true))
@@ -267,8 +277,11 @@ func TestCollisionServiceOverrideAndSuppression(t *testing.T) {
 	require.NoError(t, db.Table("movie_actresses").Where("movie_content_id = ?", credit.MovieContentID).Pluck("actress_id", &ids).Error)
 	require.Empty(t, ids)
 	require.NoError(t, db.First(&collision, collision.ID).Error)
-	require.Equal(t, models.CollisionResolutionByRemoval, collision.Resolution)
+	require.Equal(t, models.CollisionResolutionBySuppression, collision.Resolution)
 	require.Equal(t, models.CollisionStatusResolved, collision.Status)
+	require.NoError(t, db.First(&historical, historical.ID).Error)
+	require.Equal(t, models.CollisionResolutionByRemoval, historical.Resolution)
+	require.Equal(t, models.CollisionStatusResolved, historical.Status)
 	require.NoError(t, service.SetCreditSuppressed(ctx, credit.ID, false))
 	ids = nil
 	require.NoError(t, db.Table("movie_actresses").Where("movie_content_id = ?", credit.MovieContentID).Pluck("actress_id", &ids).Error)
@@ -277,6 +290,9 @@ func TestCollisionServiceOverrideAndSuppression(t *testing.T) {
 	require.Equal(t, models.CollisionStatusOpen, collision.Status)
 	require.Empty(t, collision.Resolution)
 	require.True(t, collision.UserPinned)
+	require.NoError(t, db.First(&historical, historical.ID).Error)
+	require.Equal(t, models.CollisionResolutionByRemoval, historical.Resolution)
+	require.Equal(t, models.CollisionStatusResolved, historical.Status)
 	require.NoError(t, service.UpdateCreditOverride(ctx, credit.ID, "", false))
 	require.NoError(t, db.First(&credit, credit.ID).Error)
 	require.False(t, credit.Suppressed)

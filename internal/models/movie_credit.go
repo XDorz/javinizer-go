@@ -40,6 +40,7 @@ const (
 	CollisionResolutionAutoKeep       = "auto_keep"
 	CollisionResolutionAutoAlias      = "auto_alias"
 	CollisionResolutionByRemoval      = "resolved_by_removal"
+	CollisionResolutionBySuppression  = "resolved_by_suppression"
 )
 
 // MovieCredit implements the credit identity lifecycle contract.

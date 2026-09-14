@@ -171,6 +171,39 @@ func TestRecordFieldCollisionsTxBranches(t *testing.T) {
 	require.NoError(t, u.recordFieldCollisionsTx(db.DB, collisions, aliases, &credit, &actress, CollisionPolicyAutoKeep, nil))
 }
 
+func TestRecordFieldCollisionsHonorsAcceptedAlias(t *testing.T) {
+	db := newCreditTestDB(t)
+	u := creditCoverageUpserter(db)
+	actress := models.Actress{FirstName: "Truth", LastName: "Original", Verified: true, Origin: ActressOriginUser}
+	require.NoError(t, db.Create(&actress).Error)
+	require.NoError(t, db.Create(&models.ActressAlias{AliasName: "Stage Name", CanonicalName: "Original Truth"}).Error)
+	movie := creditCoverageMovie(t, db, "field-alias-match")
+	movie.Credits = []models.MovieCredit{{
+		CreditedName: "Stage Name",
+		Source:       "dmm",
+		Scraped:      models.Actress{FirstName: "Stage", LastName: "Name"},
+	}}
+
+	require.NoError(t, u.persistCreditsTx(db.DB, movie))
+	open, err := NewCreditCollisionRepository(db).ListOpenByMovie(t.Context(), movie.ContentID)
+	require.NoError(t, err)
+	require.Empty(t, open)
+	require.Equal(t, actress.ID, movie.Credits[0].ActressID)
+}
+
+func TestRecordFieldCollisionsAliasLookupError(t *testing.T) {
+	db := newCreditTestDB(t)
+	u := creditCoverageUpserter(db)
+	movie := creditCoverageMovie(t, db, "field-alias-error")
+	actress := models.Actress{FirstName: "Truth", LastName: "Original", Verified: true}
+	require.NoError(t, db.Create(&actress).Error)
+	credit := models.MovieCredit{MovieContentID: movie.ContentID, ActressID: actress.ID, CreditedName: "Different Name"}
+	require.NoError(t, db.Create(&credit).Error)
+	collisions, aliases := creditCoverageRepos(db)
+	injectDatabaseCallbackError(t, db, "query", "actress_aliases", 1)
+	require.Error(t, u.recordFieldCollisionsTx(db.DB, collisions, aliases, &credit, &actress, CollisionPolicyBlock, nil))
+}
+
 func TestRecordFieldCollisionsMatchesCanonicalJapaneseName(t *testing.T) {
 	db := newCreditTestDB(t)
 	u := creditCoverageUpserter(db)

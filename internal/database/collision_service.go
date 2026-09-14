@@ -242,7 +242,7 @@ func setCreditSuppressedTx(tx *gorm.DB, creditID uint, suppressed bool) error {
 	}
 	collisionUpdates := map[string]interface{}{
 		colStatus:     models.CollisionStatusResolved,
-		colResolution: models.CollisionResolutionByRemoval,
+		colResolution: models.CollisionResolutionBySuppression,
 		colUpdatedAt:  time.Now().UTC(),
 	}
 	collisionQuery := tx.Model(&models.CreditCollision{}).
@@ -255,7 +255,7 @@ func setCreditSuppressedTx(tx *gorm.DB, creditID uint, suppressed bool) error {
 			colUpdatedAt:  time.Now().UTC(),
 		}
 		collisionQuery = tx.Model(&models.CreditCollision{}).
-			Where("credit_id = ? AND status = ? AND resolution = ?", creditID, models.CollisionStatusResolved, models.CollisionResolutionByRemoval)
+			Where("credit_id = ? AND status = ? AND resolution = ?", creditID, models.CollisionStatusResolved, models.CollisionResolutionBySuppression)
 	}
 	if err := collisionQuery.Updates(collisionUpdates).Error; err != nil {
 		return err

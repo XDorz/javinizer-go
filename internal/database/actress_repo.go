@@ -486,6 +486,7 @@ func (r *ActressRepository) ImportUpsert(ctx context.Context, incoming *models.A
 	if existing.Verified && (existing.Origin == ActressOriginUser || existing.Origin == ActressOriginImport) {
 		incoming.Verified = existing.Verified
 		incoming.Origin = existing.Origin
+		incoming.DMMID = existing.DMMID
 		fillEmptyActressFields(existing, incoming)
 		incoming.FirstName = existing.FirstName
 		incoming.LastName = existing.LastName

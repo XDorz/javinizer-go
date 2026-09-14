@@ -181,6 +181,22 @@ func TestImportUpsertPromotesDMMlessCandidateWithDMMID(t *testing.T) {
 	require.True(t, stored.Verified)
 }
 
+func TestImportUpsertPreservesDMMIDForProtectedIdentity(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := NewActressRepository(db)
+	existing := models.Actress{DMMID: 24680, FirstName: "Protected", LastName: "Identity", Verified: true, Origin: ActressOriginUser}
+	require.NoError(t, repo.Create(context.Background(), &existing))
+
+	incoming := models.Actress{FirstName: "Protected", LastName: "Identity", ThumbURL: "import-thumb"}
+	require.NoError(t, repo.ImportUpsert(context.Background(), &incoming))
+	require.Equal(t, existing.ID, incoming.ID)
+	require.Equal(t, existing.DMMID, incoming.DMMID)
+
+	stored, err := repo.FindByID(context.Background(), existing.ID)
+	require.NoError(t, err)
+	require.Equal(t, existing.DMMID, stored.DMMID)
+}
+
 func TestImportUpsertCandidateLookupError(t *testing.T) {
 	db := newCreditTestDB(t)
 	repo := NewActressRepository(db)

@@ -94,14 +94,10 @@ func (r *MovieCreditRepository) UpsertTx(tx *gorm.DB, credit *models.MovieCredit
 	if err == nil {
 		credit.ID = existing.ID
 		credit.CreatedAt = existing.CreatedAt
-		if existing.Suppressed {
-			credit.ID = existing.ID
-			credit.CreatedAt = existing.CreatedAt
-			credit.Suppressed = true
-			return nil
-		}
 		updateCols := []string{"credited_name", "credited_japanese_name", "reported_thumb_url", colSource, colUpdatedAt}
-		if existing.Origin != string(models.CreditOriginUser) {
+		if existing.Suppressed {
+			credit.Suppressed = true
+		} else if existing.Origin != string(models.CreditOriginUser) {
 			updateCols = append(updateCols, "origin")
 		}
 		if !existing.OrderPinned {
