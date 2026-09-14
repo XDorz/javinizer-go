@@ -628,6 +628,15 @@ func TestMatcher_MatchFile_CustomRegexEmptyCapture(t *testing.T) {
 	assert.Nil(t, result, "custom regex with empty capture group must yield no match (falls back to builtin, which also misses '123')")
 }
 
+func TestMatcher_MatchFile_CustomRegexNonParticipatingCapture(t *testing.T) {
+	cfg := &Config{RegexEnabled: true, RegexPattern: `(?:foo|(ABC-\d+))`}
+	m, err := NewMatcher(cfg)
+	require.NoError(t, err)
+
+	result := m.MatchFile(models.FileMatchInfo{Name: "foo.mp4", Extension: ".mp4"})
+	assert.Nil(t, result)
+}
+
 func TestMatcher_EZ_CatalogSuffix_MatchStringConsistent(t *testing.T) {
 	// MatchString must apply the same E/Z stripping as MatchFile for built-in matches
 	// so downstream re-match (e.g. scrape_phase buildScrapeCmd) stays consistent.

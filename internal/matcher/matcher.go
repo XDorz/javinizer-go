@@ -140,6 +140,9 @@ func (m *Matcher) matchWithRegex(file models.FileMatchInfo, filename string, pat
 		// No capture group means no usable ID for matcher output.
 		return nil
 	}
+	if loc[2] < 0 || loc[3] < 0 {
+		return nil
+	}
 	id := strings.TrimSpace(filename[loc[2]:loc[3]])
 	if id == "" {
 		// Empty capture should be treated as no match to allow fallback behavior.
