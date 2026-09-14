@@ -35,3 +35,52 @@ func recordCreditReassignmentTx(tx *gorm.DB, movieContentID string, sourceActres
 			updated_at = excluded.updated_at`,
 		movieContentID, sourceActressID, targetActressID, now, now).Error
 }
+
+func moveCreditReassignmentsTx(tx *gorm.DB, sourceActressID, targetActressID uint) error {
+	var rows []models.MovieCreditReassignment
+	if err := tx.Where(
+		"source_actress_id = ? OR target_actress_id = ? OR source_actress_id = ?",
+		sourceActressID, sourceActressID, targetActressID,
+	).Order("updated_at ASC, id ASC").Find(&rows).Error; err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+
+	type reassignmentKey struct {
+		movieContentID  string
+		sourceActressID uint
+	}
+	ids := make([]uint, 0, len(rows))
+	byKey := make(map[reassignmentKey]models.MovieCreditReassignment, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+		if row.SourceActressID == sourceActressID {
+			row.SourceActressID = targetActressID
+		}
+		if row.TargetActressID == sourceActressID {
+			row.TargetActressID = targetActressID
+		}
+		if row.SourceActressID == row.TargetActressID {
+			continue
+		}
+		key := reassignmentKey{movieContentID: row.MovieContentID, sourceActressID: row.SourceActressID}
+		byKey[key] = row
+	}
+
+	if err := tx.Where("id IN ?", ids).Delete(&models.MovieCreditReassignment{}).Error; err != nil {
+		return err
+	}
+	if len(byKey) == 0 {
+		return nil
+	}
+	now := time.Now().UTC()
+	normalized := make([]models.MovieCreditReassignment, 0, len(byKey))
+	for _, row := range byKey {
+		row.ID = 0
+		row.UpdatedAt = now
+		normalized = append(normalized, row)
+	}
+	return tx.Create(&normalized).Error
+}

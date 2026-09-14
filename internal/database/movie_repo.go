@@ -108,6 +108,9 @@ func (r *MovieRepository) Delete(ctx context.Context, id string) error {
 			return nil
 		}
 
+		if err := deleteCreditReassignmentsTx(tx, "movie_content_id = ?", "movie "+movie.ContentID, movie.ContentID); err != nil {
+			return err
+		}
 		if err := deleteCreditRecordsTx(tx, "movie_content_id = ?", "movie_content_id = ?", movie.ContentID, "movie "+movie.ContentID); err != nil {
 			return err
 		}

@@ -37,14 +37,27 @@ func BuildCreditsFromScrape(movie *models.Movie, actressSources map[string]strin
 		}
 		seen[key] = true
 
-		source := strings.TrimSpace(actressSources[key])
+		source := ""
+		sourceKey := ""
+		for _, candidateKey := range actressSourceKeysFromInfo(models.ActressInfo{
+			DMMID:        actress.DMMID,
+			FirstName:    actress.FirstName,
+			LastName:     actress.LastName,
+			JapaneseName: actress.JapaneseName,
+		}) {
+			if candidateSource := strings.TrimSpace(actressSources[candidateKey]); candidateSource != "" {
+				source = candidateSource
+				sourceKey = candidateKey
+				break
+			}
+		}
 		creditedName := actress.FullName()
 		creditedJP := actress.JapaneseName
 		reportedThumb := actress.ThumbURL
 		if source != "" {
 			if result, ok := resultsBySource[source]; ok {
 				for _, info := range result.Actresses {
-					if actressInfoMatchesKey(info, key) {
+					if actressInfoMatchesKey(info, sourceKey) {
 						creditedName = infoFullName(info)
 						creditedJP = info.JapaneseName
 						reportedThumb = info.ThumbURL

@@ -687,6 +687,9 @@ func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error
 
 	projections := make([]models.Actress, 0, len(movie.Credits))
 	for i := range movie.Credits {
+		if movie.Credits[i].Suppressed {
+			continue
+		}
 		id := movie.Credits[i].ActressID
 		if a, ok := resolvedById[id]; ok {
 			projections = append(projections, a)

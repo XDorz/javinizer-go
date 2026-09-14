@@ -406,6 +406,10 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 			return wrapDBErr("merge", fmt.Sprintf("movie credits from %d to %d", sourceID, targetID), err)
 		}
 
+		if err := moveCreditReassignmentsTx(tx, sourceID, targetID); err != nil {
+			return wrapDBErr("merge", fmt.Sprintf("credit reassignments from %d to %d", sourceID, targetID), err)
+		}
+
 		if err := tx.Exec(
 			"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id IN (SELECT movie_content_id FROM movie_credits WHERE actress_id = ?)",
 			targetID,

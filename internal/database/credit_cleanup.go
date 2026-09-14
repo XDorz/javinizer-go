@@ -17,3 +17,10 @@ func deleteCreditRecordsTx(tx *gorm.DB, collisionWhere, creditWhere string, valu
 	}
 	return nil
 }
+
+func deleteCreditReassignmentsTx(tx *gorm.DB, where, label string, args ...any) error {
+	if err := tx.Where(where, args...).Delete(&models.MovieCreditReassignment{}).Error; err != nil {
+		return wrapDBErr("delete", fmt.Sprintf("credit reassignments for %s", label), err)
+	}
+	return nil
+}

@@ -82,6 +82,9 @@ func (r *ActressRepository) FindByID(ctx context.Context, id uint) (*models.Actr
 // Delete removes the actress with the given primary key.
 func (r *ActressRepository) Delete(ctx context.Context, id uint) error {
 	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := deleteCreditReassignmentsTx(tx, "source_actress_id = ? OR target_actress_id = ?", fmt.Sprintf("actress %d", id), id, id); err != nil {
+			return err
+		}
 		if err := deleteCreditRecordsTx(tx, "credit_id IN (SELECT id FROM movie_credits WHERE actress_id = ?)", "actress_id = ?", id, fmt.Sprintf("actress %d", id)); err != nil {
 			return err
 		}

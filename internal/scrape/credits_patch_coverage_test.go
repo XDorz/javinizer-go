@@ -39,6 +39,21 @@ func TestBuildCreditsFromScrapePatchBranches(t *testing.T) {
 	assert.Equal(t, "source", movie.Credits[0].Source)
 }
 
+func TestBuildCreditsFromScrapeUsesAlternateProvenanceKey(t *testing.T) {
+	movie := &models.Movie{Actresses: []models.Actress{{FirstName: "Canonical", LastName: "Person", JapaneseName: "日本名"}}}
+	results := []*models.ScraperResult{{
+		Source:    "source",
+		Actresses: []models.ActressInfo{{FirstName: "Canonical", LastName: "Person", ThumbURL: "reported.jpg"}},
+	}}
+
+	BuildCreditsFromScrape(movie, map[string]string{"name:person canonical": "source"}, results)
+
+	assert.Len(t, movie.Credits, 1)
+	assert.Equal(t, "source", movie.Credits[0].Source)
+	assert.Equal(t, "Person Canonical", movie.Credits[0].CreditedName)
+	assert.Equal(t, "reported.jpg", movie.Credits[0].ReportedThumbURL)
+}
+
 func TestAttachCreditPolicyPatchBranches(t *testing.T) {
 	AttachCreditPolicy(nil, &Config{})
 	AttachCreditPolicy(&models.Movie{}, nil)
