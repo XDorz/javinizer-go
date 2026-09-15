@@ -308,7 +308,7 @@ func reconcileActressCollisionsTx(tx *gorm.DB, actressID uint) error {
 		return wrapDBErr("list", fmt.Sprintf("open collisions for actress %d", actressID), err)
 	}
 
-	canonicalName := actress.FullName()
+	canonicalName := canonicalActressName(&actress)
 	for i := range collisions {
 		collision := &collisions[i]
 		canonicalValue := canonicalName
@@ -362,7 +362,7 @@ func retargetActressAliasesTx(tx *gorm.DB, actressID uint, oldCanonicalName stri
 	if err := tx.First(&actress, actressID).Error; err != nil {
 		return wrapDBErr("load", fmt.Sprintf("actress %d", actressID), err)
 	}
-	newCanonicalName := actress.FullName()
+	newCanonicalName := canonicalActressName(&actress)
 	if strings.TrimSpace(newCanonicalName) == "" || oldCanonicalName == newCanonicalName {
 		return nil
 	}

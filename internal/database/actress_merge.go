@@ -57,13 +57,14 @@ type ActressMergeResult struct {
 // and alias candidates. It is produced by PlanMerge and consumed by ExecuteMerge,
 // separating the "what to merge" decision from the "how to execute" side effect.
 type MergePlan struct {
-	TargetID           uint
-	SourceID           uint
-	Merged             models.Actress
-	CanonicalName      string
-	AliasesAdded       int
-	SourceAliasUpserts []string
-	ConflictsResolved  int
+	TargetID              uint
+	SourceID              uint
+	OriginalCanonicalName string
+	Merged                models.Actress
+	CanonicalName         string
+	AliasesAdded          int
+	SourceAliasUpserts    []string
+	ConflictsResolved     int
 }
 
 // actressMerger handles actress merge operations, extracted from ActressRepository
@@ -135,6 +136,13 @@ func moveMovieAssociations(tx *gorm.DB, sourceID, targetID uint) (int, error) {
 	return updatedMovies, nil
 }
 
+func removeLegacyActressAssociationTx(tx *gorm.DB, movieContentID string, actressID uint) error {
+	return tx.Exec(
+		"DELETE FROM movie_actresses WHERE movie_content_id = ? AND actress_id = ?",
+		movieContentID, actressID,
+	).Error
+}
+
 func moveCredits(tx *gorm.DB, sourceID, targetID uint) error {
 	var sourceCredits []models.MovieCredit
 	if err := tx.Where("actress_id = ?", sourceID).Find(&sourceCredits).Error; err != nil {
@@ -170,6 +178,11 @@ func moveCredits(tx *gorm.DB, sourceID, targetID uint) error {
 					return err
 				}
 			}
+			if sc.Suppressed || targetCredit.Suppressed {
+				if err := removeLegacyActressAssociationTx(tx, sc.MovieContentID, targetID); err != nil {
+					return err
+				}
+			}
 			if err := transferCollisionsTx(tx, sc.ID, targetCredit.ID); err != nil {
 				return err
 			}
@@ -182,6 +195,11 @@ func moveCredits(tx *gorm.DB, sourceID, targetID uint) error {
 				colUpdatedAt: time.Now().UTC(),
 			}).Error; err != nil {
 				return err
+			}
+			if sc.Suppressed {
+				if err := removeLegacyActressAssociationTx(tx, sc.MovieContentID, targetID); err != nil {
+					return err
+				}
 			}
 		} else {
 			return err
@@ -329,13 +347,14 @@ func (m *actressMerger) PlanMerge(ctx context.Context, targetID, sourceID uint, 
 	sourceAliasUpserts := sourceAliasesForUpsert(sourceCandidates, canonicalName)
 
 	return &MergePlan{
-		TargetID:           targetID,
-		SourceID:           sourceID,
-		Merged:             merged,
-		CanonicalName:      canonicalName,
-		AliasesAdded:       aliasesAdded,
-		SourceAliasUpserts: sourceAliasUpserts,
-		ConflictsResolved:  len(preview.Conflicts),
+		TargetID:              targetID,
+		SourceID:              sourceID,
+		OriginalCanonicalName: canonicalActressName(&preview.Target),
+		Merged:                merged,
+		CanonicalName:         canonicalName,
+		AliasesAdded:          aliasesAdded,
+		SourceAliasUpserts:    sourceAliasUpserts,
+		ConflictsResolved:     len(preview.Conflicts),
 	}, nil
 }
 
@@ -346,6 +365,7 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 	targetID := plan.TargetID
 	sourceID := plan.SourceID
 	merged := plan.Merged
+	oldCanonicalName := plan.OriginalCanonicalName
 
 	updatedMovies := 0
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -402,8 +422,16 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 			return wrapDBErr("merge", fmt.Sprintf("actress movie associations from %d to %d", sourceID, targetID), moveErr)
 		}
 
+		if err := retargetActressAliasesTx(tx, targetID, oldCanonicalName); err != nil {
+			return err
+		}
+
 		if err := moveCredits(tx, sourceID, targetID); err != nil {
 			return wrapDBErr("merge", fmt.Sprintf("movie credits from %d to %d", sourceID, targetID), err)
+		}
+
+		if err := reconcileActressCollisionsTx(tx, targetID); err != nil {
+			return err
 		}
 
 		if err := moveCreditReassignmentsTx(tx, sourceID, targetID); err != nil {

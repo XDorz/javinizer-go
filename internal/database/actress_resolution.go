@@ -138,6 +138,16 @@ func findVerifiedByNameTx(tx *gorm.DB, japaneseName, firstName, lastName string)
 	return matched, nil
 }
 
+func filterDMMlessActresses(actresses []models.Actress) []models.Actress {
+	filtered := make([]models.Actress, 0, len(actresses))
+	for i := range actresses {
+		if actresses[i].DMMID <= 0 {
+			filtered = append(filtered, actresses[i])
+		}
+	}
+	return filtered
+}
+
 func findCandidateByNameKeyTx(tx *gorm.DB, nameKey string) (*models.Actress, error) {
 	if nameKey == "" {
 		return nil, gorm.ErrRecordNotFound
@@ -224,6 +234,9 @@ func ResolveActressIdentityTx(tx *gorm.DB, scraped *models.Actress) (*models.Act
 	if err != nil {
 		return nil, ResolutionMatched, wrapDBErr("resolve alias", actressNameKey(scraped), err)
 	}
+	if scraped.DMMID > 0 {
+		aliasMatches = filterDMMlessActresses(aliasMatches)
+	}
 	if len(aliasMatches) == 1 {
 		return &aliasMatches[0], ResolutionMatched, nil
 	}
@@ -239,6 +252,9 @@ func ResolveActressIdentityTx(tx *gorm.DB, scraped *models.Actress) (*models.Act
 	verifiedMatches, err := findVerifiedByNameTx(tx, scraped.JapaneseName, scraped.FirstName, scraped.LastName)
 	if err != nil {
 		return nil, ResolutionMatched, wrapDBErr("resolve name", actressNameKey(scraped), err)
+	}
+	if scraped.DMMID > 0 {
+		verifiedMatches = filterDMMlessActresses(verifiedMatches)
 	}
 	if len(verifiedMatches) == 1 {
 		return &verifiedMatches[0], ResolutionMatched, nil

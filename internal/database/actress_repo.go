@@ -536,7 +536,10 @@ func (r *ActressRepository) findImportMatch(ctx context.Context, incoming *model
 		}
 		matches = dmmLessMatches
 	}
-	if len(matches) >= 1 {
+	if len(matches) > 1 {
+		return nil, fmt.Errorf("ambiguous import match for %s: %d verified identities share the exact name", incoming.FullName(), len(matches))
+	}
+	if len(matches) == 1 {
 		return &matches[0], nil
 	}
 	candidate, candidateErr := findCandidateByNameKeyTx(r.GetDB().WithContext(ctx), actressNameKey(incoming))
