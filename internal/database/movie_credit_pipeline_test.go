@@ -434,6 +434,16 @@ func TestPromoteCandidateMarksCreditingMoviesDirty(t *testing.T) {
 	assert.ElementsMatch(t, []uint{actressID}, afterIDs)
 }
 
+func TestPromoteCandidateUpdateFailure(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := db.Repositories()
+	candidate := models.Actress{FirstName: "Update", LastName: "Failure", Verified: false, Origin: ActressOriginScrape}
+	require.NoError(t, db.Create(&candidate).Error)
+	injectDatabaseCallbackError(t, db, "update", "actresses", 1)
+
+	require.Error(t, repo.ActressRepo.PromoteCandidate(context.Background(), candidate.ID, "Updated", "Candidate", "", ""))
+}
+
 func TestCreditTranslationsFollowResolvedIdentities(t *testing.T) {
 	db := newCreditTestDB(t)
 	repo := db.Repositories()
