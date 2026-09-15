@@ -475,10 +475,12 @@ func (r *ActressRepository) ImportUpsert(ctx context.Context, incoming *models.A
 	if existing == nil {
 		incoming.Verified = true
 		incoming.Origin = ActressOriginImport
-		if err := r.GetDB().WithContext(ctx).Create(incoming).Error; err != nil {
-			return wrapDBErr("create", fmt.Sprintf("imported actress %s", incoming.FullName()), err)
-		}
-		return nil
+		return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(incoming).Error; err != nil {
+				return wrapDBErr("create", fmt.Sprintf("imported actress %s", incoming.FullName()), err)
+			}
+			return nil
+		})
 	}
 	incoming.ID = existing.ID
 	incoming.CreatedAt = existing.CreatedAt
@@ -487,6 +489,7 @@ func (r *ActressRepository) ImportUpsert(ctx context.Context, incoming *models.A
 	if incoming.DMMID == 0 && existing.DMMID > 0 {
 		incoming.DMMID = existing.DMMID
 	}
+	promotingCandidate := !existing.Verified
 	if existing.Verified && (existing.Origin == ActressOriginUser || existing.Origin == ActressOriginImport) {
 		incoming.Verified = existing.Verified
 		incoming.Origin = existing.Origin
@@ -497,10 +500,15 @@ func (r *ActressRepository) ImportUpsert(ctx context.Context, incoming *models.A
 		incoming.JapaneseName = existing.JapaneseName
 		incoming.ThumbURL = existing.ThumbURL
 	}
-	if err := r.GetDB().WithContext(ctx).Save(incoming).Error; err != nil {
-		return wrapDBErr("save", fmt.Sprintf("imported actress %s", incoming.FullName()), err)
-	}
-	return nil
+	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(incoming).Error; err != nil {
+			return wrapDBErr("save", fmt.Sprintf("imported actress %s", incoming.FullName()), err)
+		}
+		if !promotingCandidate {
+			return nil
+		}
+		return restoreActressProjectionTx(tx, incoming.ID)
+	})
 }
 
 func (r *ActressRepository) findImportMatch(ctx context.Context, incoming *models.Actress) (*models.Actress, error) {

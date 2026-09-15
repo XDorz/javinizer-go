@@ -593,7 +593,6 @@ func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error
 		existingByActress[ex.ActressID] = ex
 	}
 
-	resolvedById := make(map[uint]models.Actress, len(movie.Credits))
 	seen := make(map[uint]bool, len(movie.Credits))
 	order := 0
 	for i := range movie.Credits {
@@ -637,8 +636,6 @@ func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error
 		if ex, ok := existingByActress[credit.ActressID]; ok && ex.OrderPinned {
 			credit.OrderIndex = ex.OrderIndex
 		}
-		resolvedById[resolved.ID] = *resolved
-
 		if err := creditRepo.UpsertTx(tx, credit); err != nil {
 			return err
 		}
@@ -704,15 +701,16 @@ func (u *MovieUpserter) persistCreditsTx(tx *gorm.DB, movie *models.Movie) error
 		}
 	}
 
-	projections := make([]models.Actress, 0, len(movie.Credits))
-	for i := range movie.Credits {
-		if movie.Credits[i].Suppressed {
+	surviving, err := creditRepo.ListByMovieTx(tx, movie.ContentID)
+	if err != nil {
+		return err
+	}
+	projections := make([]models.Actress, 0, len(surviving))
+	for _, credit := range surviving {
+		if credit.Suppressed || credit.Actress == nil || !credit.Actress.Verified {
 			continue
 		}
-		id := movie.Credits[i].ActressID
-		if a, ok := resolvedById[id]; ok && a.Verified {
-			projections = append(projections, a)
-		}
+		projections = append(projections, *credit.Actress)
 	}
 	movie.Actresses = projections
 	if len(projections) > 0 {

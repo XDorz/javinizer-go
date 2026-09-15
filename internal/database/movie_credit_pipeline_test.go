@@ -485,6 +485,48 @@ func TestCreditTranslationsFollowResolvedIdentities(t *testing.T) {
 	assert.Equal(t, "Verified EN", byActress[verified.ID].DisplayName)
 }
 
+func TestPersistCreditsPreservesLegacyProjectionForPreservedCredit(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := db.Repositories()
+	actress := models.Actress{FirstName: "Kept", LastName: "Credit", Verified: true, Origin: ActressOriginUser}
+	require.NoError(t, repo.ActressRepo.Create(context.Background(), &actress))
+	movie := &models.Movie{ContentID: "preserved-credit-projection", ID: "preserved-credit-projection"}
+	require.NoError(t, db.Create(movie).Error)
+	require.NoError(t, db.Create(&models.MovieCredit{
+		MovieContentID: movie.ContentID,
+		ActressID:      actress.ID,
+		CreditedName:   actress.FullName(),
+		Origin:         string(models.CreditOriginUser),
+	}).Error)
+
+	saved, err := repo.MovieRepo.UpsertWithTranslations(context.Background(), &models.Movie{
+		ContentID: movie.ContentID,
+		ID:        movie.ID,
+		Credits:   []models.MovieCredit{},
+	}, nil, nil)
+	require.NoError(t, err)
+	require.Len(t, saved.Actresses, 1)
+	require.Equal(t, actress.ID, saved.Actresses[0].ID)
+	var actressIDs []uint
+	require.NoError(t, db.Table("movie_actresses").Where("movie_content_id = ?", movie.ContentID).Pluck("actress_id", &actressIDs).Error)
+	require.ElementsMatch(t, []uint{actress.ID}, actressIDs)
+}
+
+func TestPersistCreditsTxReturnsPreservedCreditReloadError(t *testing.T) {
+	db := newCreditTestDB(t)
+	u := creditCoverageUpserter(db)
+	movie := creditCoverageMovie(t, db, "preserved-credit-reload-error")
+	actress := models.Actress{FirstName: "Reload", LastName: "Error", Verified: true, Origin: ActressOriginUser}
+	require.NoError(t, db.Create(&actress).Error)
+	require.NoError(t, db.Create(&models.MovieCredit{
+		MovieContentID: movie.ContentID,
+		ActressID:      actress.ID,
+		Origin:         string(models.CreditOriginUser),
+	}).Error)
+	injectDatabaseCallbackError(t, db, "query", "movie_credits", 2)
+	require.Error(t, u.persistCreditsTx(db.DB, movie))
+}
+
 func TestPromoteCandidateRollsBackProjectionRestoreFailure(t *testing.T) {
 	t.Run("association restore", func(t *testing.T) {
 		db := newCreditTestDB(t)

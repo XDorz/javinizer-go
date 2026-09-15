@@ -181,6 +181,38 @@ func TestImportUpsertMatchesDMMBackedCandidateByUniqueName(t *testing.T) {
 	var storedCredit models.MovieCredit
 	require.NoError(t, db.First(&storedCredit, credit.ID).Error)
 	require.Equal(t, candidate.ID, storedCredit.ActressID)
+	var actressIDs []uint
+	require.NoError(t, db.Table("movie_actresses").Where("movie_content_id = ?", movie.ContentID).Pluck("actress_id", &actressIDs).Error)
+	require.ElementsMatch(t, []uint{candidate.ID}, actressIDs)
+	var storedMovie models.Movie
+	require.NoError(t, db.First(&storedMovie, "content_id = ?", movie.ContentID).Error)
+	require.True(t, storedMovie.RenderDirty)
+}
+
+func TestImportUpsertRollsBackCandidatePromotionOnProjectionFailure(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := NewActressRepository(db)
+	candidate := models.Actress{
+		DMMID:     987651,
+		FirstName: "Atomic",
+		LastName:  "Candidate",
+		Origin:    ActressOriginScrape,
+	}
+	require.NoError(t, repo.Create(context.Background(), &candidate))
+	movie := models.Movie{ContentID: "atomic-import-promotion", ID: "atomic-import-promotion"}
+	require.NoError(t, db.Create(&movie).Error)
+	require.NoError(t, db.Create(&models.MovieCredit{MovieContentID: movie.ContentID, ActressID: candidate.ID}).Error)
+	require.NoError(t, db.Exec("CREATE TRIGGER fail_import_projection_dirty BEFORE UPDATE OF render_dirty ON movies BEGIN SELECT RAISE(ABORT, 'injected database error'); END").Error)
+	t.Cleanup(func() { _ = db.Exec("DROP TRIGGER fail_import_projection_dirty").Error })
+
+	incoming := models.Actress{FirstName: candidate.FirstName, LastName: candidate.LastName}
+	require.Error(t, repo.ImportUpsert(context.Background(), &incoming))
+	var stored models.Actress
+	require.NoError(t, db.First(&stored, candidate.ID).Error)
+	require.False(t, stored.Verified)
+	var actressIDs []uint
+	require.NoError(t, db.Table("movie_actresses").Where("movie_content_id = ?", movie.ContentID).Pluck("actress_id", &actressIDs).Error)
+	require.Empty(t, actressIDs)
 }
 
 func TestImportUpsertIDLookupError(t *testing.T) {
