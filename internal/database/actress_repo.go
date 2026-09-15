@@ -430,6 +430,9 @@ func (r *ActressRepository) PromoteCandidate(ctx context.Context, id uint, first
 		if err := tx.Model(&models.Actress{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 			return wrapDBErr("promote", fmt.Sprintf("candidate %d", id), err)
 		}
+		if err := resolveCandidateIdentityCollisionsTx(tx, id); err != nil {
+			return err
+		}
 		return restoreActressProjectionTx(tx, id)
 	})
 }
@@ -506,6 +509,9 @@ func (r *ActressRepository) ImportUpsert(ctx context.Context, incoming *models.A
 		}
 		if !promotingCandidate {
 			return nil
+		}
+		if err := resolveCandidateIdentityCollisionsTx(tx, incoming.ID); err != nil {
+			return err
 		}
 		return restoreActressProjectionTx(tx, incoming.ID)
 	})
@@ -638,11 +644,28 @@ WHERE verified = 0
          OR al.canonical_name = (actresses.last_name || ' ' || actresses.first_name)
          OR al.canonical_name = (actresses.first_name || ' ' || actresses.last_name)
   )
+  AND NOT EXISTS (
+      SELECT 1 FROM movie_credit_reassignments mr
+      WHERE mr.source_actress_id = actresses.id
+  )
 `, olderThan)
 	if res.Error != nil {
 		return 0, wrapDBErr("delete", "stale candidates", res.Error)
 	}
 	return res.RowsAffected, nil
+}
+
+func resolveCandidateIdentityCollisionsTx(tx *gorm.DB, actressID uint) error {
+	if err := tx.Model(&models.CreditCollision{}).
+		Where("credit_id IN (SELECT id FROM movie_credits WHERE actress_id = ?) AND field = ? AND status = ?", actressID, models.CreditFieldIdentityLink, models.CollisionStatusOpen).
+		Updates(map[string]interface{}{
+			colStatus:     models.CollisionStatusResolved,
+			colResolution: models.CollisionResolutionKeepIdentity,
+			colUpdatedAt:  time.Now().UTC(),
+		}).Error; err != nil {
+		return wrapDBErr("resolve", fmt.Sprintf("identity collisions for actress %d", actressID), err)
+	}
+	return nil
 }
 
 func restoreActressProjectionTx(tx *gorm.DB, actressID uint) error {

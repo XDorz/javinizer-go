@@ -14,12 +14,14 @@
 	} = $props();
 
 	let open = $state(false);
+	let candidateOffset = $state(0);
+	const CANDIDATE_PAGE_SIZE = 100;
 
 	const queryClient = useQueryClient();
 
 	const candidatesQuery = createQuery(() => ({
-		queryKey: ['actress-candidates'],
-		queryFn: () => apiClient.listCandidates(100, 0),
+		queryKey: ['actress-candidates', candidateOffset],
+		queryFn: () => apiClient.listCandidates(CANDIDATE_PAGE_SIZE, candidateOffset),
 		enabled: open
 	}));
 
@@ -32,6 +34,12 @@
 				thumb_url: candidate.thumb_url
 			}),
 		onSuccess: (promoted) => {
+			const remaining = Math.max(0, total - 1);
+			const lastOffset = Math.max(
+				0,
+				(Math.ceil(remaining / CANDIDATE_PAGE_SIZE) - 1) * CANDIDATE_PAGE_SIZE
+			);
+			candidateOffset = Math.min(candidateOffset, lastOffset);
 			void queryClient.invalidateQueries({ queryKey: ['actress-candidates'] });
 			void onPromoted(promoted);
 		}
@@ -59,6 +67,10 @@
 
 	let candidatesList = $derived(candidatesQuery.data?.candidates ?? []);
 	let total = $derived(candidatesQuery.data?.total ?? 0);
+	let currentPage = $derived(Math.floor(candidateOffset / CANDIDATE_PAGE_SIZE) + 1);
+	let totalPages = $derived(Math.max(1, Math.ceil(total / CANDIDATE_PAGE_SIZE)));
+	let canGoPrev = $derived(candidateOffset > 0);
+	let canGoNext = $derived(candidateOffset + CANDIDATE_PAGE_SIZE < total);
 </script>
 
 <Card class="p-5 space-y-4">
@@ -138,6 +150,30 @@
 						</li>
 					{/each}
 				</ul>
+
+				{#if totalPages > 1}
+					<div class="flex items-center justify-between gap-3 border-t pt-3">
+						<span class="text-xs text-muted-foreground">Page {currentPage} of {totalPages}</span>
+						<div class="flex items-center gap-2">
+							<Button
+								variant="outline"
+								size="sm"
+								onclick={() => (candidateOffset -= CANDIDATE_PAGE_SIZE)}
+								disabled={!canGoPrev}
+							>
+								Previous
+							</Button>
+							<Button
+								variant="outline"
+								size="sm"
+								onclick={() => (candidateOffset += CANDIDATE_PAGE_SIZE)}
+								disabled={!canGoNext}
+							>
+								Next
+							</Button>
+						</div>
+					</div>
+				{/if}
 			{/if}
 		</div>
 	{/if}

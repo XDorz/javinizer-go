@@ -527,6 +527,42 @@ func TestPersistCreditsTxReturnsPreservedCreditReloadError(t *testing.T) {
 	require.Error(t, u.persistCreditsTx(db.DB, movie))
 }
 
+func TestPromoteCandidateResolvesIdentityLinkCollision(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := db.Repositories()
+	candidate := models.Actress{FirstName: "Candidate", LastName: "Identity", Origin: ActressOriginScrape}
+	require.NoError(t, repo.ActressRepo.Create(context.Background(), &candidate))
+	movie := models.Movie{ContentID: "promote-identity-collision", ID: "promote-identity-collision"}
+	require.NoError(t, db.Create(&movie).Error)
+	credit := models.MovieCredit{MovieContentID: movie.ContentID, ActressID: candidate.ID}
+	require.NoError(t, db.Create(&credit).Error)
+	collision := models.CreditCollision{
+		CreditID: credit.ID, MovieContentID: movie.ContentID,
+		Field: models.CreditFieldIdentityLink, ReportedValue: "Identity Candidate",
+		CanonicalValue: "Identity Candidate", Status: models.CollisionStatusOpen,
+	}
+	require.NoError(t, db.Create(&collision).Error)
+
+	require.NoError(t, repo.ActressRepo.PromoteCandidate(context.Background(), candidate.ID, "Candidate", "Identity", "", ""))
+	var stored models.CreditCollision
+	require.NoError(t, db.First(&stored, collision.ID).Error)
+	require.Equal(t, models.CollisionStatusResolved, stored.Status)
+	require.Equal(t, models.CollisionResolutionKeepIdentity, stored.Resolution)
+}
+
+func TestPromoteCandidateIdentityCollisionCleanupFailure(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := db.Repositories()
+	candidate := models.Actress{FirstName: "Cleanup", LastName: "Failure", Origin: ActressOriginScrape}
+	require.NoError(t, repo.ActressRepo.Create(context.Background(), &candidate))
+	require.NoError(t, db.Migrator().DropTable(&models.CreditCollision{}))
+
+	require.Error(t, repo.ActressRepo.PromoteCandidate(context.Background(), candidate.ID, "Cleanup", "Failure", "", ""))
+	var stored models.Actress
+	require.NoError(t, db.First(&stored, candidate.ID).Error)
+	require.False(t, stored.Verified)
+}
+
 func TestPromoteCandidateRollsBackProjectionRestoreFailure(t *testing.T) {
 	t.Run("association restore", func(t *testing.T) {
 		db := newCreditTestDB(t)
@@ -628,6 +664,13 @@ func TestDeleteStaleCandidatesKeepsReferenced(t *testing.T) {
 
 	orphan := &models.Actress{LastName: "Orphan", FirstName: "Candidate", Verified: false, Origin: "scrape"}
 	require.NoError(t, repo.ActressRepo.Create(context.Background(), orphan))
+	reassignmentSource := &models.Actress{LastName: "Reassigned", FirstName: "Source", Verified: false, Origin: "scrape"}
+	target := &models.Actress{LastName: "Reassigned", FirstName: "Target", Verified: true, Origin: ActressOriginUser}
+	require.NoError(t, repo.ActressRepo.Create(context.Background(), reassignmentSource))
+	require.NoError(t, repo.ActressRepo.Create(context.Background(), target))
+	require.NoError(t, db.Create(&models.MovieCreditReassignment{
+		MovieContentID: movie.ContentID, SourceActressID: reassignmentSource.ID, TargetActressID: target.ID,
+	}).Error)
 
 	pruned, err := repo.ActressRepo.DeleteStaleCandidates(context.Background(), time.Now().Add(time.Hour))
 	require.NoError(t, err)
@@ -635,4 +678,6 @@ func TestDeleteStaleCandidatesKeepsReferenced(t *testing.T) {
 
 	_, err = repo.ActressRepo.FindByID(context.Background(), referencedID)
 	assert.NoError(t, err, "candidate with credits must not be pruned")
+	_, err = repo.ActressRepo.FindByID(context.Background(), reassignmentSource.ID)
+	assert.NoError(t, err, "candidate referenced by a reassignment must not be pruned")
 }

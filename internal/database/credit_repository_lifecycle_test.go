@@ -171,6 +171,12 @@ func TestImportUpsertMatchesDMMBackedCandidateByUniqueName(t *testing.T) {
 	require.NoError(t, db.Create(&movie).Error)
 	credit := models.MovieCredit{MovieContentID: movie.ContentID, ActressID: candidate.ID}
 	require.NoError(t, db.Create(&credit).Error)
+	collision := models.CreditCollision{
+		CreditID: credit.ID, MovieContentID: movie.ContentID,
+		Field: models.CreditFieldIdentityLink, ReportedValue: "DMMCandidate NameOnly",
+		CanonicalValue: "DMMCandidate NameOnly", Status: models.CollisionStatusOpen,
+	}
+	require.NoError(t, db.Create(&collision).Error)
 
 	incoming := models.Actress{FirstName: "NameOnly", LastName: "DMMCandidate"}
 	require.NoError(t, repo.ImportUpsert(context.Background(), &incoming))
@@ -187,6 +193,10 @@ func TestImportUpsertMatchesDMMBackedCandidateByUniqueName(t *testing.T) {
 	var storedMovie models.Movie
 	require.NoError(t, db.First(&storedMovie, "content_id = ?", movie.ContentID).Error)
 	require.True(t, storedMovie.RenderDirty)
+	var storedCollision models.CreditCollision
+	require.NoError(t, db.First(&storedCollision, collision.ID).Error)
+	require.Equal(t, models.CollisionStatusResolved, storedCollision.Status)
+	require.Equal(t, models.CollisionResolutionKeepIdentity, storedCollision.Resolution)
 }
 
 func TestImportUpsertRollsBackCandidatePromotionOnProjectionFailure(t *testing.T) {
@@ -213,6 +223,20 @@ func TestImportUpsertRollsBackCandidatePromotionOnProjectionFailure(t *testing.T
 	var actressIDs []uint
 	require.NoError(t, db.Table("movie_actresses").Where("movie_content_id = ?", movie.ContentID).Pluck("actress_id", &actressIDs).Error)
 	require.Empty(t, actressIDs)
+}
+
+func TestImportUpsertRollsBackCandidatePromotionOnCollisionCleanupFailure(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := NewActressRepository(db)
+	candidate := models.Actress{DMMID: 987652, FirstName: "Collision", LastName: "Candidate", Origin: ActressOriginScrape}
+	require.NoError(t, repo.Create(context.Background(), &candidate))
+	require.NoError(t, db.Migrator().DropTable(&models.CreditCollision{}))
+
+	incoming := models.Actress{FirstName: candidate.FirstName, LastName: candidate.LastName}
+	require.Error(t, repo.ImportUpsert(context.Background(), &incoming))
+	var stored models.Actress
+	require.NoError(t, db.First(&stored, candidate.ID).Error)
+	require.False(t, stored.Verified)
 }
 
 func TestImportUpsertIDLookupError(t *testing.T) {
