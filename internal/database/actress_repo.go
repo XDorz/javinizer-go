@@ -426,11 +426,12 @@ func (r *ActressRepository) PromoteCandidate(ctx context.Context, id uint, first
 		colJapaneseName: japaneseName,
 		"thumb_url":     thumbURL,
 	}
-	if err := r.GetDB().WithContext(ctx).Model(&models.Actress{}).Where("id = ?", id).Updates(updates).Error; err != nil {
-		return wrapDBErr("promote", fmt.Sprintf("candidate %d", id), err)
-	}
-	r.markCreditingMoviesDirty(ctx, id)
-	return nil
+	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.Actress{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+			return wrapDBErr("promote", fmt.Sprintf("candidate %d", id), err)
+		}
+		return restoreActressProjectionTx(tx, id)
+	})
 }
 
 // SetUserOwned marks an identity as user-owned so curated imports cannot
@@ -634,6 +635,23 @@ WHERE verified = 0
 		return 0, wrapDBErr("delete", "stale candidates", res.Error)
 	}
 	return res.RowsAffected, nil
+}
+
+func restoreActressProjectionTx(tx *gorm.DB, actressID uint) error {
+	if err := tx.Exec(`
+		INSERT OR IGNORE INTO movie_actresses (movie_content_id, actress_id)
+		SELECT movie_content_id, actress_id
+		FROM movie_credits
+		WHERE actress_id = ? AND suppressed = ?`, actressID, false).Error; err != nil {
+		return wrapDBErr("restore", fmt.Sprintf("legacy actress associations for %d", actressID), err)
+	}
+	if err := tx.Exec(
+		"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id IN (SELECT movie_content_id FROM movie_credits WHERE actress_id = ?)",
+		actressID,
+	).Error; err != nil {
+		return wrapDBErr("mark dirty", fmt.Sprintf("movies for actress %d", actressID), err)
+	}
+	return nil
 }
 
 func (r *ActressRepository) markCreditingMoviesDirty(ctx context.Context, actressID uint) {

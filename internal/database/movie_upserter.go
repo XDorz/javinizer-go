@@ -96,7 +96,11 @@ func (u *MovieUpserter) UpsertWithTranslations(ctx context.Context, movie *model
 			}
 
 			// Step 5: Upsert translations (core movie record + translations)
-			if err := u.upsertTranslationsTx(tx, movie, savedTranslations, genreTranslations, actressTranslations); err != nil {
+			var actressTranslationIDs map[int]uint
+			if !movie.SkipCreditReconcile {
+				actressTranslationIDs = actressTranslationIDsForCredits(savedActresses, movie.Credits)
+			}
+			if err := u.upsertTranslationsTx(tx, movie, savedTranslations, genreTranslations, actressTranslations, actressTranslationIDs); err != nil {
 				return err
 			}
 			if movie.Credits == nil {
@@ -278,12 +282,27 @@ func (u *MovieUpserter) reconcileLegacyActressEditsTx(tx *gorm.DB, movie *models
 
 // upsertTranslationsTx saves the core movie record (without translation slice)
 // and persists all translations (movie, genre, actress).
-func (u *MovieUpserter) upsertTranslationsTx(tx *gorm.DB, movie *models.Movie, translations []models.MovieTranslation, genreTranslations []models.GenreTranslationData, actressTranslations []models.ActressTranslationData) error {
+func (u *MovieUpserter) upsertTranslationsTx(tx *gorm.DB, movie *models.Movie, translations []models.MovieTranslation, genreTranslations []models.GenreTranslationData, actressTranslations []models.ActressTranslationData, actressTranslationIDs map[int]uint) error {
 	movie.Translations = nil
-	if err := upsertMovieCore(tx, u.repo.GetDB(), movie, translations, genreTranslations, actressTranslations); err != nil {
+	if err := upsertMovieCoreWithActressTranslationIDs(tx, u.repo.GetDB(), movie, translations, genreTranslations, actressTranslations, actressTranslationIDs); err != nil {
 		return wrapDBErr("save", fmt.Sprintf("movie %s", movie.ContentID), err)
 	}
 	return nil
+}
+
+func actressTranslationIDsForCredits(actresses []models.Actress, credits []models.MovieCredit) map[int]uint {
+	limit := len(actresses)
+	if len(credits) < limit {
+		limit = len(credits)
+	}
+	if limit == 0 {
+		return nil
+	}
+	ids := make(map[int]uint, limit)
+	for i := 0; i < limit; i++ {
+		ids[i] = credits[i].ActressID
+	}
+	return ids
 }
 
 func (u *MovieUpserter) saveMovieWithAssociations(tx *gorm.DB, movie *models.Movie) error {

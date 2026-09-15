@@ -155,11 +155,8 @@ func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution s
 		if err := reconcileActressCollisionsTx(tx, credit.ActressID); err != nil {
 			return 0, err
 		}
-		if err := tx.Exec(
-			"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id IN (SELECT movie_content_id FROM movie_credits WHERE actress_id = ?)",
-			credit.ActressID,
-		).Error; err != nil {
-			return 0, wrapDBErr("mark dirty", fmt.Sprintf("movies for actress %d", credit.ActressID), err)
+		if err := restoreActressProjectionTx(tx, credit.ActressID); err != nil {
+			return 0, err
 		}
 	} else if err := tx.Exec(
 		"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id = ?",

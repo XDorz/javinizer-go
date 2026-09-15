@@ -414,6 +414,10 @@ func TestPromoteCandidateMarksCreditingMoviesDirty(t *testing.T) {
 	require.NoError(t, err)
 	actressID := saved.Credits[0].ActressID
 
+	var beforeIDs []uint
+	require.NoError(t, db.Table("movie_actresses").Where("movie_content_id = ?", "abc015").Pluck("actress_id", &beforeIDs).Error)
+	assert.Empty(t, beforeIDs)
+
 	require.NoError(t, repo.ActressRepo.PromoteCandidate(context.Background(), actressID, "Promote", "Me", "", ""))
 
 	updated, err := repo.MovieRepo.FindByID(context.Background(), "abc015")
@@ -425,6 +429,108 @@ func TestPromoteCandidateMarksCreditingMoviesDirty(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, promoted.Verified)
 	assert.Equal(t, "user", promoted.Origin)
+	var afterIDs []uint
+	require.NoError(t, db.Table("movie_actresses").Where("movie_content_id = ?", "abc015").Pluck("actress_id", &afterIDs).Error)
+	assert.ElementsMatch(t, []uint{actressID}, afterIDs)
+}
+
+func TestCreditTranslationsFollowResolvedIdentities(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := db.Repositories()
+	verified := models.Actress{DMMID: 99001, FirstName: "Verified", LastName: "Two", Verified: true, Origin: ActressOriginUser}
+	require.NoError(t, repo.ActressRepo.Create(context.Background(), &verified))
+
+	movie := &models.Movie{
+		ContentID: "credit-translation-identities",
+		ID:        "credit-translation-identities",
+		Actresses: []models.Actress{
+			{FirstName: "Candidate", LastName: "One"},
+			{DMMID: verified.DMMID, FirstName: "Verified", LastName: "Two"},
+		},
+		Credits: []models.MovieCredit{
+			{CreditedName: "One Candidate", Scraped: models.Actress{FirstName: "Candidate", LastName: "One"}},
+			{CreditedName: "Two Verified", Scraped: models.Actress{DMMID: verified.DMMID, FirstName: "Verified", LastName: "Two"}},
+		},
+	}
+	translations := []models.ActressTranslationData{
+		{ActressIndex: 0, Language: "en", FirstName: "Candidate EN", DisplayName: "Candidate EN", SourceName: "test"},
+		{ActressIndex: 1, Language: "en", FirstName: "Verified EN", DisplayName: "Verified EN", SourceName: "test"},
+		{ActressIndex: 99, Language: "en", DisplayName: "Invalid", SourceName: "test"},
+	}
+
+	saved, err := repo.MovieRepo.UpsertWithTranslations(context.Background(), movie, nil, translations)
+	require.NoError(t, err)
+	require.Len(t, saved.Credits, 2)
+
+	var stored []models.ActressTranslation
+	require.NoError(t, db.Where("language = ?", "en").Order("actress_id ASC").Find(&stored).Error)
+	require.Len(t, stored, 2)
+	byActress := make(map[uint]models.ActressTranslation, len(stored))
+	for _, translation := range stored {
+		byActress[translation.ActressID] = translation
+	}
+	candidateID := saved.Credits[0].ActressID
+	require.NotEqual(t, verified.ID, candidateID)
+	assert.Equal(t, "Candidate EN", byActress[candidateID].DisplayName)
+	assert.Equal(t, "Verified EN", byActress[verified.ID].DisplayName)
+}
+
+func TestPromoteCandidateRollsBackProjectionRestoreFailure(t *testing.T) {
+	t.Run("association restore", func(t *testing.T) {
+		db := newCreditTestDB(t)
+		repo := db.Repositories()
+		movie := creditMovie("promote-association-failure", []models.MovieCredit{{
+			CreditedName: "Association Failure",
+			Scraped:      models.Actress{FirstName: "Association", LastName: "Failure"},
+		}})
+		saved, err := repo.MovieRepo.Upsert(context.Background(), movie)
+		require.NoError(t, err)
+		actressID := saved.Credits[0].ActressID
+		require.NoError(t, db.Migrator().DropTable("movie_actresses"))
+
+		require.Error(t, repo.ActressRepo.PromoteCandidate(context.Background(), actressID, "Association", "Failure", "", ""))
+		var candidate models.Actress
+		require.NoError(t, db.First(&candidate, actressID).Error)
+		assert.False(t, candidate.Verified)
+	})
+
+	t.Run("dirty mark", func(t *testing.T) {
+		db := newCreditTestDB(t)
+		repo := db.Repositories()
+		movie := creditMovie("promote-dirty-failure", []models.MovieCredit{{
+			CreditedName: "Dirty Failure",
+			Scraped:      models.Actress{FirstName: "Dirty", LastName: "Failure"},
+		}})
+		saved, err := repo.MovieRepo.Upsert(context.Background(), movie)
+		require.NoError(t, err)
+		actressID := saved.Credits[0].ActressID
+		require.NoError(t, db.Exec("CREATE TRIGGER fail_promote_projection_dirty BEFORE UPDATE OF render_dirty ON movies BEGIN SELECT RAISE(ABORT, 'injected'); END").Error)
+
+		require.Error(t, repo.ActressRepo.PromoteCandidate(context.Background(), actressID, "Dirty", "Failure", "", ""))
+		var candidate models.Actress
+		require.NoError(t, db.First(&candidate, actressID).Error)
+		assert.False(t, candidate.Verified)
+		var actressIDs []uint
+		require.NoError(t, db.Table("movie_actresses").Where("movie_content_id = ?", movie.ContentID).Pluck("actress_id", &actressIDs).Error)
+		assert.Empty(t, actressIDs)
+	})
+}
+
+func TestCollisionAdoptCanonicalRestoresLegacyAssociation(t *testing.T) {
+	db, service, credit, collision := collisionFixture(t)
+	require.NoError(t, db.Model(&models.Actress{}).Where("id = ?", credit.ActressID).Update("verified", false).Error)
+	collision.Field = models.CreditFieldIdentityLink
+	require.NoError(t, db.Save(&collision).Error)
+
+	_, err := service.Resolve(context.Background(), collision.ID, models.CollisionResolutionAdoptCanonical, 0)
+	require.NoError(t, err)
+
+	var actressIDs []uint
+	require.NoError(t, db.Table("movie_actresses").Where("movie_content_id = ?", credit.MovieContentID).Pluck("actress_id", &actressIDs).Error)
+	assert.ElementsMatch(t, []uint{credit.ActressID}, actressIDs)
+	var actress models.Actress
+	require.NoError(t, db.First(&actress, credit.ActressID).Error)
+	assert.True(t, actress.Verified)
 }
 
 func TestMergeCollidingCreditsKeepsTargetWithUserPayload(t *testing.T) {
