@@ -160,7 +160,29 @@ func findCandidateByNameKeyTx(tx *gorm.DB, nameKey string) (*models.Actress, err
 	return &found, nil
 }
 
+func findCandidateByDMMIDTx(tx *gorm.DB, dmmID int) (*models.Actress, error) {
+	if dmmID <= 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	var found models.Actress
+	err := tx.Where("verified = ? AND dmm_id = ?", false, dmmID).First(&found).Error
+	if err != nil {
+		return nil, err
+	}
+	return &found, nil
+}
+
 func resolveAmbiguousCandidateTx(tx *gorm.DB, scraped *models.Actress, nameKey string) (*models.Actress, error) {
+	if scraped.DMMID > 0 {
+		candidate, err := findCandidateByDMMIDTx(tx, scraped.DMMID)
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, wrapDBErr("resolve candidate", fmt.Sprintf("dmm %d", scraped.DMMID), err)
+		}
+		if candidate != nil {
+			return candidate, nil
+		}
+		return createCandidateTx(tx, scraped, "")
+	}
 	if nameKey == "" {
 		return nil, fmt.Errorf("resolve actress identity: ambiguous match with empty name key")
 	}

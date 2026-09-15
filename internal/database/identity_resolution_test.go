@@ -52,8 +52,54 @@ func TestIdentityResolutionAliasAndDMMHierarchy(t *testing.T) {
 	require.Error(t, err)
 	_, err = findCandidateByNameKeyTx(db.DB, "")
 	require.Error(t, err)
+	_, err = findCandidateByDMMIDTx(db.DB, 0)
+	require.Error(t, err)
 	_, err = resolveAmbiguousCandidateTx(db.DB, &models.Actress{}, "")
 	require.Error(t, err)
+}
+
+func TestAmbiguousDMMCandidatesRemainSeparate(t *testing.T) {
+	db := newCreditTestDB(t)
+	for i := 0; i < 2; i++ {
+		require.NoError(t, db.Create(&models.Actress{
+			JapaneseName: "同名", FirstName: "Same", LastName: "Name", Verified: true, Origin: ActressOriginUser,
+		}).Error)
+	}
+
+	first, firstOutcome, err := ResolveActressIdentityTx(db.DB, &models.Actress{
+		DMMID: 2001, JapaneseName: "同名", FirstName: "Same", LastName: "Name",
+	})
+	require.NoError(t, err)
+	require.Equal(t, ResolutionAmbiguous, firstOutcome)
+	require.False(t, first.Verified)
+	require.Equal(t, 2001, first.DMMID)
+
+	second, secondOutcome, err := ResolveActressIdentityTx(db.DB, &models.Actress{
+		DMMID: 2002, JapaneseName: "同名", FirstName: "Same", LastName: "Name",
+	})
+	require.NoError(t, err)
+	require.Equal(t, ResolutionAmbiguous, secondOutcome)
+	require.False(t, second.Verified)
+	require.Equal(t, 2002, second.DMMID)
+	require.NotEqual(t, first.ID, second.ID)
+
+	byDMM, err := findCandidateByDMMIDTx(db.DB, 2002)
+	require.NoError(t, err)
+	require.Equal(t, second.ID, byDMM.ID)
+	reused, err := resolveAmbiguousCandidateTx(db.DB, &models.Actress{DMMID: 2002}, "same")
+	require.NoError(t, err)
+	require.Equal(t, second.ID, reused.ID)
+
+	repeated, repeatedOutcome, err := ResolveActressIdentityTx(db.DB, &models.Actress{
+		DMMID: 2002, JapaneseName: "別名", FirstName: "Other", LastName: "Name",
+	})
+	require.NoError(t, err)
+	require.Equal(t, ResolutionCandidateLinked, repeatedOutcome)
+	require.Equal(t, second.ID, repeated.ID)
+
+	candidates, err := NewActressRepository(db).ListCandidates(context.Background(), 100, 0)
+	require.NoError(t, err)
+	require.Len(t, candidates, 2)
 }
 
 func TestIdentityResolutionDatabaseErrors(t *testing.T) {
@@ -70,6 +116,8 @@ func TestIdentityResolutionDatabaseErrors(t *testing.T) {
 	_, err = findCandidateByNameKeyTx(tx, "key")
 	require.Error(t, err)
 	_, err = resolveAmbiguousCandidateTx(tx, &models.Actress{}, "key")
+	require.Error(t, err)
+	_, err = resolveAmbiguousCandidateTx(tx, &models.Actress{DMMID: 42}, "key")
 	require.Error(t, err)
 	_, err = createCandidateTx(tx, &models.Actress{}, "")
 	require.Error(t, err)

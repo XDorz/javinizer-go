@@ -515,6 +515,7 @@ func newCLIBatchRuntime(bs *bootstrapResult, cfg *config.Config, opts BatchComma
 	var initialPersistErr error
 	storeOpts := []worker.JobStoreOption{
 		worker.WithHistoryRepo(repos.HistoryRepo),
+		worker.WithCollisionRepo(repos.CreditCollisionRepo),
 		worker.WithSkipStartupRecovery(),
 		worker.WithInitialPersistErrorReporter(func(err error) { initialPersistErr = err }),
 	}
