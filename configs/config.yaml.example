@@ -366,6 +366,7 @@ metadata:
         actress_as_tag: false
         add_generic_role: false  # Add generic "Actress" role to all actresses
         alt_name_role: false     # Use alternate name (Japanese) in role field
+        use_credited_name: false  # Use each movie's credited actress name
         include_originalpath: false  # Include source filename in NFO
         include_stream_details: false
         include_fanart: true

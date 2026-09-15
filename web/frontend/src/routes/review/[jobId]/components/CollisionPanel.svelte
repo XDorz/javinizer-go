@@ -12,7 +12,7 @@
 		onResolved = () => {}
 	}: {
 		movieContentId: string;
-		onResolved?: (remaining: number) => void;
+		onResolved?: (remaining: number) => void | Promise<void>;
 	} = $props();
 
 	const queryClient = useQueryClient();
@@ -36,10 +36,10 @@
 				resolution: input.resolution,
 				target_actress_id: input.targetActressId
 			}),
-		onSuccess: (res, variables) => {
+		onSuccess: async (res, variables) => {
 			void queryClient.invalidateQueries({ queryKey: ['collisions'] });
 			if (variables.movieContentId === movieContentId) {
-				onResolved(res.remaining_open);
+				await onResolved(res.remaining_open);
 			}
 		}
 	}));

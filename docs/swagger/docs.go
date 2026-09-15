@@ -7357,6 +7357,10 @@ const docTemplate = `{
                 "per_file": {
                     "description": "Create separate NFO for each multi-part file",
                     "type": "boolean"
+                },
+                "use_credited_name": {
+                    "description": "Render credited names instead of canonical identity names",
+                    "type": "boolean"
                 }
             }
         },

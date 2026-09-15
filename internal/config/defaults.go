@@ -195,6 +195,7 @@ func defaultNFOConfig() NFOConfig {
 			ActressAsTag:         false,
 			AddGenericRole:       false,
 			AltNameRole:          false,
+			UseCreditedName:      false,
 		},
 		Format: NFOFormatConfig{
 			DisplayTitle:       "<TITLE>",

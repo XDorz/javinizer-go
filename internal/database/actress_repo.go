@@ -427,8 +427,24 @@ func (r *ActressRepository) PromoteCandidate(ctx context.Context, id uint, first
 		"thumb_url":     thumbURL,
 	}
 	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var candidate models.Actress
+		if err := tx.First(&candidate, id).Error; err != nil {
+			return wrapDBErr("promote", fmt.Sprintf("candidate %d", id), err)
+		}
+		previousName := canonicalActressName(&candidate)
+		promotedName := canonicalActressName(&models.Actress{
+			FirstName:    firstName,
+			LastName:     lastName,
+			JapaneseName: japaneseName,
+		})
+
 		if err := tx.Model(&models.Actress{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 			return wrapDBErr("promote", fmt.Sprintf("candidate %d", id), err)
+		}
+		if previousName != "" && !strings.EqualFold(previousName, promotedName) {
+			if err := upsertActressAliases(tx, collectActressAliasCandidates(&candidate), promotedName); err != nil {
+				return wrapDBErr("promote", fmt.Sprintf("aliases for candidate %d", id), err)
+			}
 		}
 		if err := resolveCandidateIdentityCollisionsTx(tx, id); err != nil {
 			return err

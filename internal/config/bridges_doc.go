@@ -73,6 +73,7 @@
 //	cfg.Metadata.NFO.Format.ActressLanguageJA      → downloader, nfo
 //	cfg.Metadata.NFO.Feature.AddGenericRole         → nfo
 //	cfg.Metadata.NFO.Feature.AltNameRole            → nfo
+//	cfg.Metadata.NFO.Feature.UseCreditedName        → nfo
 //	cfg.Metadata.NFO.Extra.Credits                → nfo
 //	cfg.Metadata.NFO.Format.DisplayTitle            → api/core, workflow
 //	cfg.Metadata.NFO.Feature.Enabled                → nfo, workflow

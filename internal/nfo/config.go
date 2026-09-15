@@ -76,7 +76,8 @@ type Config struct {
 // Config-bridge reads: cfg.Metadata.NFO.Format.ActressLanguageJA,
 // cfg.Metadata.NFO.Format.UnknownActressMode, cfg.Metadata.NFO.Format.UnknownActressText,
 // cfg.Metadata.NFO.Feature.ActressAsTag, cfg.Metadata.NFO.Feature.AddGenericRole,
-// cfg.Metadata.NFO.Feature.AltNameRole, cfg.Metadata.NFO.Feature.IncludeOriginalPath,
+// cfg.Metadata.NFO.Feature.AltNameRole, cfg.Metadata.NFO.Feature.UseCreditedName,
+// cfg.Metadata.NFO.Feature.IncludeOriginalPath,
 // cfg.Metadata.NFO.Feature.IncludeStreamDetails, cfg.Metadata.NFO.Feature.IncludeFanart,
 // cfg.Metadata.NFO.Feature.IncludeTrailer, cfg.Metadata.NFO.Format.RatingSource,
 // cfg.Metadata.NFO.Extra.Tag, cfg.Metadata.NFO.Format.Tagline, cfg.Metadata.NFO.Extra.Credits
@@ -109,6 +110,7 @@ func ConfigFromAppConfig(cfg *config.Config, nameCfg NFONameConfig) *Config {
 		GroupActressName:        nameCfg.GroupActressName,
 		GroupUnknownActressName: nameCfg.GroupUnknownActressName,
 		ActressDelimiter:        nameCfg.ActressDelimiter,
+		UseCreditedName:         cfg.Metadata.NFO.Feature.UseCreditedName,
 	}
 }
 

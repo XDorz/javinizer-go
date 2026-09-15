@@ -434,6 +434,24 @@ func TestPromoteCandidateMarksCreditingMoviesDirty(t *testing.T) {
 	assert.ElementsMatch(t, []uint{actressID}, afterIDs)
 }
 
+func TestPromoteCandidatePreservesReportedNameAlias(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := db.Repositories()
+	candidate := models.Actress{FirstName: "Old", LastName: "Stage", Origin: ActressOriginScrape}
+	require.NoError(t, repo.ActressRepo.Create(context.Background(), &candidate))
+
+	require.NoError(t, repo.ActressRepo.PromoteCandidate(context.Background(), candidate.ID, "New", "Canonical", "", ""))
+
+	var alias models.ActressAlias
+	require.NoError(t, db.First(&alias, "alias_name = ?", "Stage Old").Error)
+	require.Equal(t, "Canonical New", alias.CanonicalName)
+
+	found, outcome, err := ResolveActressIdentityTx(db.DB, &models.Actress{FirstName: "Old", LastName: "Stage"})
+	require.NoError(t, err)
+	require.Equal(t, ResolutionMatched, outcome)
+	require.Equal(t, candidate.ID, found.ID)
+}
+
 func TestPromoteCandidateUpdateFailure(t *testing.T) {
 	db := newCreditTestDB(t)
 	repo := db.Repositories()

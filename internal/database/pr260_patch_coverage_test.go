@@ -51,6 +51,22 @@ func TestPR260RepositoryFactoriesAndPolicyGuards(t *testing.T) {
 	require.Equal(t, PolicyDecision{AutoResolved: false}, ApplyFieldCollisionPolicy(CollisionPolicyAutoKeep, &models.CreditCollision{Field: models.CreditFieldIdentityLink}, "", nil))
 }
 
+func TestPR260PromoteCandidateErrorPaths(t *testing.T) {
+	t.Run("missing candidate", func(t *testing.T) {
+		db := newCreditTestDB(t)
+		repo := NewActressRepository(db)
+		require.Error(t, repo.PromoteCandidate(context.Background(), 999999, "First", "Last", "", ""))
+	})
+	t.Run("alias persistence", func(t *testing.T) {
+		db := newCreditTestDB(t)
+		repo := NewActressRepository(db)
+		candidate := models.Actress{FirstName: "Old", LastName: "Stage", Origin: ActressOriginScrape}
+		require.NoError(t, db.Create(&candidate).Error)
+		injectDatabaseCallbackError(t, db, "create", "actress_aliases", 1)
+		require.Error(t, repo.PromoteCandidate(context.Background(), candidate.ID, "New", "Canonical", "", ""))
+	})
+}
+
 func TestPR260RenameNameFieldsSuccess(t *testing.T) {
 	db := newCreditTestDB(t)
 	actress := models.Actress{FirstName: "Before"}

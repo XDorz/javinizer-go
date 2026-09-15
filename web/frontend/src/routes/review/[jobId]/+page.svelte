@@ -360,7 +360,10 @@
 							/>
 
 							{#if s.currentMovie?.code}
-								<CollisionPanel movieContentId={s.currentMovie.code} />
+								<CollisionPanel
+									movieContentId={s.currentMovie.code}
+									onResolved={() => s.refreshAfterCollision()}
+								/>
 							{/if}
 
 							<Card class="p-6">

@@ -1055,6 +1055,7 @@ export interface NFOConfig {
 	actress_as_tag?: boolean;
 	add_generic_role?: boolean;
 	alt_name_role?: boolean;
+	use_credited_name?: boolean;
 	include_originalpath?: boolean;
 	include_stream_details?: boolean;
 	include_fanart?: boolean;
