@@ -56,7 +56,11 @@ import equal from 'fast-deep-equal';
 import { calculateCompleteness, type CompletenessTier } from '$lib/utils/completeness';
 import { nextOrganizeProgress } from '$lib/utils/job-progress';
 import { createReviewMutations } from './review-mutations.svelte';
-import { buildMovieOverride, rebaseOverlayOntoMovie } from './save-helpers';
+import {
+	buildMovieOverride,
+	mergePersistedMovieIntoBatchJob,
+	rebaseOverlayOntoMovie,
+} from './save-helpers';
 import { clearCropGeometry, siblingResultFilePaths } from './poster-crop-sync';
 import { getReviewDetailTimeoutMs } from '../review-config';
 import {
@@ -1918,6 +1922,13 @@ export function createReviewState(getJobId: () => string) {
 		const targetJobId = jobId;
 		const targetGeneration = routeGeneration;
 		const baselineJob = job;
+		const targetResult = currentResult;
+		const lookupKeys = [
+			targetResult?.movie_id,
+			targetResult?.movie?.id,
+			targetResult?.movie?.code,
+			targetResult?.movie?.content_id,
+		].filter((value): value is string => Boolean(value));
 		const overlays = Array.from(editedMovies.entries());
 
 		try {
@@ -1926,6 +1937,20 @@ export function createReviewState(getJobId: () => string) {
 			if (!refreshed.data || refreshed.data.id !== targetJobId) return;
 
 			const nextJob = JSON.parse(JSON.stringify(refreshed.data)) as BatchJobResponse;
+			if (lookupKeys.length > 0) {
+				let persistedMovie: Movie | null = null;
+				for (const lookupKey of lookupKeys) {
+					try {
+						persistedMovie = await apiClient.getMovie(lookupKey);
+						break;
+					} catch {
+						continue;
+					}
+				}
+				if (!persistedMovie) return;
+				if (jobId !== targetJobId || routeGeneration !== targetGeneration) return;
+				mergePersistedMovieIntoBatchJob(nextJob, lookupKeys, persistedMovie);
+			}
 			if (baselineJob) {
 				for (const [filePath, overlay] of overlays) {
 					const baselineMovie = baselineJob.results[filePath]?.movie;
