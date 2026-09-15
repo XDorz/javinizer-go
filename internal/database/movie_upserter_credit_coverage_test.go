@@ -439,7 +439,7 @@ func TestPersistCreditsTxProjectionErrors(t *testing.T) {
 		require.NoError(t, db.Callback().Query().Before("gorm:query").Register(name, func(tx *gorm.DB) {
 			if tx.Statement != nil && tx.Statement.Table == "actresses" {
 				queries++
-				if queries == 2 {
+				if queries == 3 {
 					_ = tx.AddError(errors.New("ensure actresses failed"))
 				}
 			}
