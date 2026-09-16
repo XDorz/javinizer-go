@@ -329,8 +329,7 @@ func restoreSuppressedCreditCollisionsTx(tx *gorm.DB, credit *models.MovieCredit
 			}
 			canonicalName := canonicalActressName(actress)
 			if reportedName != "" && canonicalName != "" {
-				nameMatches := models.NormalizeActressNameKey(reportedName) == models.NormalizeActressNameKey(canonicalName) ||
-					models.NormalizeActressNameKey(reportedName) == models.NormalizeActressNameKey(actress.JapaneseName)
+				nameMatches := actressNameMatchesCanonicalRepresentations(reportedName, actress)
 				if !nameMatches {
 					aliasMatches, err := aliasMatchesCanonicalTx(tx, reportedName, actress)
 					if err != nil {
@@ -431,8 +430,7 @@ func reconcileActressCollisionsTx(tx *gorm.DB, actressID uint) error {
 		matches := false
 		switch collision.Field {
 		case models.CreditFieldCreditedName, models.CreditFieldIdentityLink:
-			matches = strings.TrimSpace(collision.ReportedValue) != "" && strings.TrimSpace(canonicalValue) != "" &&
-				models.NormalizeActressNameKey(collision.ReportedValue) == models.NormalizeActressNameKey(canonicalValue)
+			matches = actressNameMatchesCanonicalRepresentations(collision.ReportedValue, &actress)
 		case models.CreditFieldReportedThumb:
 			canonicalValue = actress.ThumbURL
 			matches = strings.TrimSpace(collision.ReportedValue) != "" && strings.TrimSpace(canonicalValue) != "" && collision.ReportedValue == canonicalValue
@@ -477,6 +475,20 @@ func canonicalActressRepresentations(actress *models.Actress) []string {
 	canonical := *actress
 	canonical.Aliases = ""
 	return collectActressAliasCandidates(&canonical)
+}
+
+func actressNameMatchesCanonicalRepresentations(reported string, actress *models.Actress) bool {
+	reportedKey := models.NormalizeActressNameKey(reported)
+	if reportedKey == "" {
+		return false
+	}
+	for _, canonical := range canonicalActressRepresentations(actress) {
+		canonicalKey := models.NormalizeActressNameKey(canonical)
+		if canonicalKey != "" && reportedKey == canonicalKey {
+			return true
+		}
+	}
+	return false
 }
 
 func transitionActressCanonicalNamesTx(tx *gorm.DB, actressID uint, previous *models.Actress) error {
