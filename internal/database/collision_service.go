@@ -58,9 +58,10 @@ func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution s
 		return 0, wrapDBErr("load", fmt.Sprintf("credit %d", collision.CreditID), err)
 	}
 	creditPtr := &credit
-	oldCanonicalName := ""
+	var previousIdentity *models.Actress
 	if credit.Actress != nil {
-		oldCanonicalName = credit.Actress.FullName()
+		copy := *credit.Actress
+		previousIdentity = &copy
 	}
 	switch resolution {
 	case models.CollisionResolutionKeepIdentity:
@@ -154,7 +155,7 @@ func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution s
 	}
 
 	if resolution == models.CollisionResolutionAdoptCanonical {
-		if err := retargetActressAliasesTx(tx, credit.ActressID, oldCanonicalName); err != nil {
+		if err := transitionActressCanonicalNamesTx(tx, credit.ActressID, previousIdentity); err != nil {
 			return 0, err
 		}
 		if err := reconcileActressCollisionsTx(tx, credit.ActressID); err != nil {
@@ -467,6 +468,70 @@ func isCJK(s string) bool {
 		}
 	}
 	return false
+}
+
+func canonicalActressRepresentations(actress *models.Actress) []string {
+	if actress == nil {
+		return nil
+	}
+	return collectActressAliasCandidates(actress)
+}
+
+func transitionActressCanonicalNamesTx(tx *gorm.DB, actressID uint, previous *models.Actress) error {
+	if previous == nil {
+		return nil
+	}
+	var current models.Actress
+	if err := tx.First(&current, actressID).Error; err != nil {
+		return wrapDBErr("load", fmt.Sprintf("actress %d", actressID), err)
+	}
+	newCanonical := canonicalActressName(&current)
+	if strings.TrimSpace(newCanonical) == "" {
+		return nil
+	}
+	currentKeys := make(map[string]struct{})
+	for _, name := range canonicalActressRepresentations(&current) {
+		if key := models.NormalizeActressNameKey(name); key != "" {
+			currentKeys[key] = struct{}{}
+		}
+	}
+	previousNames := canonicalActressRepresentations(previous)
+	previousKeys := make(map[string]struct{}, len(previousNames))
+	for _, name := range previousNames {
+		if key := models.NormalizeActressNameKey(name); key != "" {
+			previousKeys[key] = struct{}{}
+		}
+	}
+	for _, oldName := range previousNames {
+		oldName = strings.TrimSpace(oldName)
+		key := models.NormalizeActressNameKey(oldName)
+		if _, unchanged := currentKeys[key]; unchanged {
+			continue
+		}
+		if err := tx.Model(&models.ActressAlias{}).Where("canonical_name = ?", oldName).Updates(map[string]interface{}{
+			colCanonicalName: newCanonical,
+			colUpdatedAt:     time.Now().UTC(),
+		}).Error; err != nil {
+			return wrapDBErr("retarget", fmt.Sprintf("actress aliases for %d", actressID), err)
+		}
+		var existing models.ActressAlias
+		err := tx.First(&existing, "alias_name = ?", oldName).Error
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			if err := tx.Create(&models.ActressAlias{AliasName: oldName, CanonicalName: newCanonical}).Error; err != nil {
+				return wrapDBErr("create", fmt.Sprintf("actress alias %s", oldName), err)
+			}
+		case err != nil:
+			return wrapDBErr("find", fmt.Sprintf("actress alias %s", oldName), err)
+		default:
+			if _, owned := previousKeys[models.NormalizeActressNameKey(existing.CanonicalName)]; owned {
+				if err := tx.Model(&existing).Updates(map[string]interface{}{colCanonicalName: newCanonical, colUpdatedAt: time.Now().UTC()}).Error; err != nil {
+					return wrapDBErr("update", fmt.Sprintf("actress alias %s", oldName), err)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func retargetActressAliasesTx(tx *gorm.DB, actressID uint, oldCanonicalName string) error {

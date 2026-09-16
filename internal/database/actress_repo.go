@@ -72,11 +72,10 @@ func (r *ActressRepository) RenameNameFields(ctx context.Context, id uint, first
 		if err := tx.First(&current, id).Error; err != nil {
 			return wrapDBErr("rename", fmt.Sprintf("actress %d", id), err)
 		}
-		oldCanonicalName := canonicalActressName(&current)
 		if err := tx.Model(&models.Actress{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 			return wrapDBErr("rename", fmt.Sprintf("actress %d", id), err)
 		}
-		if err := retargetActressAliasesTx(tx, id, oldCanonicalName); err != nil {
+		if err := transitionActressCanonicalNamesTx(tx, id, &current); err != nil {
 			return err
 		}
 		if err := reconcileActressCollisionsTx(tx, id); err != nil {
@@ -531,6 +530,7 @@ func (r *ActressRepository) ImportUpsert(ctx context.Context, incoming *models.A
 		incoming.DMMID = existing.DMMID
 	}
 	promotingCandidate := !existing.Verified
+	previousIdentity := *existing
 	if existing.Verified && (existing.Origin == ActressOriginUser || existing.Origin == ActressOriginImport) {
 		incoming.Verified = existing.Verified
 		incoming.Origin = existing.Origin
@@ -547,6 +547,9 @@ func (r *ActressRepository) ImportUpsert(ctx context.Context, incoming *models.A
 		}
 		if !promotingCandidate {
 			return nil
+		}
+		if err := transitionActressCanonicalNamesTx(tx, incoming.ID, &previousIdentity); err != nil {
+			return err
 		}
 		if err := resolveCandidateIdentityCollisionsTx(tx, incoming.ID); err != nil {
 			return err
@@ -597,9 +600,10 @@ func (r *ActressRepository) findImportMatch(ctx context.Context, incoming *model
 	}
 	candidate, candidateErr := findCandidateByNameKeyTx(r.GetDB().WithContext(ctx), actressNameKey(incoming))
 	if candidateErr == nil {
-		return candidate, nil
-	}
-	if !errors.Is(candidateErr, gorm.ErrRecordNotFound) {
+		if incoming.DMMID == 0 || candidate.DMMID == 0 || candidate.DMMID == incoming.DMMID {
+			return candidate, nil
+		}
+	} else if !errors.Is(candidateErr, gorm.ErrRecordNotFound) {
 		return nil, wrapDBErr("find", fmt.Sprintf("import candidate %s", incoming.FullName()), candidateErr)
 	}
 	if actressNameKey(incoming) == "" {
@@ -621,6 +625,9 @@ func (r *ActressRepository) findDMMCandidateByExactName(ctx context.Context, inc
 	}
 	matches := make([]models.Actress, 0, len(candidates))
 	for i := range candidates {
+		if incoming.DMMID > 0 && candidates[i].DMMID != incoming.DMMID {
+			continue
+		}
 		if exactActressNamesMatch(incoming, &candidates[i]) {
 			matches = append(matches, candidates[i])
 		}
