@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/api/core"
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
@@ -135,7 +136,59 @@ func getBatchJobFull(deps *core.APIDeps, c *gin.Context, jobID string) {
 	logging.Debugf("[GET /batch/%s] Returning full job with %d results, completed=%d, failed=%d",
 		jobID, len(job.Results), job.Completed, job.Failed)
 
+	if err := refreshBatchJobMovies(c, deps, job); err != nil {
+		c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("failed to refresh batch movie projections: %v", err)})
+		return
+	}
 	c.JSON(http.StatusOK, buildBatchJobResponse(job))
+}
+
+func refreshBatchJobMovies(c *gin.Context, deps *core.APIDeps, job *worker.BatchJobStatus) error {
+	if deps == nil || deps.Repos.MovieRepo == nil || job == nil {
+		return nil
+	}
+	for filePath, result := range job.Results {
+		if result == nil || result.Movie == nil {
+			continue
+		}
+		movieID := strings.TrimSpace(result.FileMatchInfo.MovieID)
+		if movieID == "" {
+			movieID = strings.TrimSpace(result.Movie.ContentID)
+		}
+		if movieID == "" {
+			movieID = strings.TrimSpace(result.Movie.ID)
+		}
+		if movieID == "" {
+			continue
+		}
+		current, err := deps.Repos.MovieRepo.FindByID(c.Request.Context(), movieID)
+		if err != nil {
+			if database.IsNotFound(err) {
+				continue
+			}
+			return err
+		}
+		if current == nil {
+			continue
+		}
+		live, ok := deps.GetJobStore().GetBatchJob(string(job.ID))
+		if !ok {
+			return fmt.Errorf("job %s vanished during authoritative movie refresh", job.ID)
+		}
+		marker, ok := live.(interface{ MarkPersistedMovie(string, string, uint64) })
+		if !ok {
+			return fmt.Errorf("job %s cannot record authoritative movie refresh", job.ID)
+		}
+		marker.MarkPersistedMovie(filePath, result.ResultID, result.Revision)
+		copyResult := *result
+		copyMovie := *result.Movie
+		copyMovie.Actresses = append([]models.Actress(nil), current.Actresses...)
+		copyMovie.Credits = append([]models.MovieCredit(nil), current.Credits...)
+		copyMovie.UpdatedAt = current.UpdatedAt
+		copyResult.Movie = &copyMovie
+		job.Results[filePath] = &copyResult
+	}
+	return nil
 }
 
 func getBatchJobSlim(deps *core.APIDeps, c *gin.Context, jobID string) {

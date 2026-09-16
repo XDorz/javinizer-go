@@ -155,6 +155,346 @@ func TestCollisionServiceResolutions(t *testing.T) {
 	}
 }
 
+func TestCollisionServiceKeepIdentityRejectsUnverifiedCandidate(t *testing.T) {
+	db := newCreditTestDB(t)
+	repos := db.Repositories()
+	for _, actress := range []models.Actress{
+		{JapaneseName: "双子", FirstName: "A", Verified: true, Origin: ActressOriginUser},
+		{JapaneseName: "双子", FirstName: "B", Verified: true, Origin: ActressOriginUser},
+	} {
+		require.NoError(t, repos.ActressRepo.Create(context.Background(), &actress))
+	}
+	movie := creditMovie("candidate-keep-identity", []models.MovieCredit{{
+		CreditedName: "双子", Source: "dmm", Scraped: models.Actress{JapaneseName: "双子"},
+	}})
+	saved, err := repos.MovieRepo.UpsertWithTranslations(context.Background(), movie, nil, nil)
+	require.NoError(t, err)
+	require.Len(t, saved.Credits, 1)
+	credit := saved.Credits[0]
+	require.NotNil(t, credit.Actress)
+	require.False(t, credit.Actress.Verified)
+
+	collisions, err := repos.CreditCollisionRepo.ListOpenByMovie(context.Background(), movie.ContentID)
+	require.NoError(t, err)
+	require.Len(t, collisions, 1)
+	require.Equal(t, models.CreditFieldIdentityLink, collisions[0].Field)
+
+	_, err = NewCollisionService(db).Resolve(context.Background(), collisions[0].ID, models.CollisionResolutionKeepIdentity, 0)
+	require.Error(t, err)
+	var candidate models.Actress
+	require.NoError(t, db.First(&candidate, credit.ActressID).Error)
+	require.False(t, candidate.Verified)
+	require.Equal(t, ActressOriginScrape, candidate.Origin)
+	var savedCollision models.CreditCollision
+	require.NoError(t, db.First(&savedCollision, collisions[0].ID).Error)
+	require.Equal(t, models.CollisionStatusOpen, savedCollision.Status)
+	require.Empty(t, savedCollision.Resolution)
+	var actressIDs []uint
+	require.NoError(t, db.Table("movie_actresses").Where("movie_content_id = ?", movie.ContentID).Pluck("actress_id", &actressIDs).Error)
+	require.Empty(t, actressIDs)
+}
+
+func TestCollisionServiceReassignReconcilesTransferredCollisions(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		existingTarget bool
+	}{
+		{name: "repoint"},
+		{name: "merge existing target credit", existingTarget: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, service, source, selected := collisionFixture(t)
+			target := models.Actress{FirstName: "Person", LastName: "Reported", ThumbURL: "target-thumb", Verified: true, Origin: ActressOriginUser}
+			require.NoError(t, db.Create(&target).Error)
+			movie := models.Movie{ContentID: source.MovieContentID}
+			require.NoError(t, db.Model(&movie).Association("Actresses").Replace([]models.Actress{{ID: source.ActressID}}))
+
+			var targetCredit models.MovieCredit
+			if tc.existingTarget {
+				targetCredit = models.MovieCredit{MovieContentID: source.MovieContentID, ActressID: target.ID, CreditedName: "Target Credit"}
+				require.NoError(t, db.Create(&targetCredit).Error)
+				require.NoError(t, db.Model(&movie).Association("Actresses").Replace([]models.Actress{{ID: source.ActressID}, {ID: target.ID}}))
+				targetCollision := models.CreditCollision{
+					CreditID: targetCredit.ID, MovieContentID: source.MovieContentID, Field: models.CreditFieldCreditedName,
+					ReportedValue: selected.ReportedValue, CanonicalValue: "stale target", Status: models.CollisionStatusOpen,
+					Occurrences: 2, SourcesSeen: "javdb",
+				}
+				require.NoError(t, db.Create(&targetCollision).Error)
+			}
+
+			transferred := []models.CreditCollision{
+				{CreditID: source.ID, MovieContentID: source.MovieContentID, Field: models.CreditFieldReportedThumb, ReportedValue: "target-thumb", CanonicalValue: "stale", Status: models.CollisionStatusOpen},
+				{CreditID: source.ID, MovieContentID: source.MovieContentID, Field: models.CreditFieldReportedThumb, ReportedValue: "other-thumb", CanonicalValue: "stale", Status: models.CollisionStatusOpen},
+				{CreditID: source.ID, MovieContentID: source.MovieContentID, Field: models.CreditFieldCreditedName, ReportedValue: "Different Person", CanonicalValue: "stale", Status: models.CollisionStatusOpen},
+			}
+			for i := range transferred {
+				require.NoError(t, db.Create(&transferred[i]).Error)
+			}
+
+			remaining, err := service.Resolve(context.Background(), selected.ID, models.CollisionResolutionReassign, target.ID)
+			require.NoError(t, err)
+			require.Equal(t, 2, remaining)
+			var actressIDs []uint
+			require.NoError(t, db.Table("movie_actresses").Where("movie_content_id = ?", source.MovieContentID).Pluck("actress_id", &actressIDs).Error)
+			require.ElementsMatch(t, []uint{target.ID}, actressIDs)
+			credits, err := service.Credits.ListByMovie(context.Background(), source.MovieContentID)
+			require.NoError(t, err)
+			require.Len(t, credits, 1)
+			require.Equal(t, target.ID, credits[0].ActressID)
+
+			var rows []models.CreditCollision
+			require.NoError(t, db.Where("credit_id = ?", credits[0].ID).Find(&rows).Error)
+			require.Len(t, rows, 4)
+			for _, row := range rows {
+				switch {
+				case row.Field == models.CreditFieldCreditedName && row.ReportedValue == selected.ReportedValue:
+					require.Equal(t, target.FullName(), row.CanonicalValue)
+					require.Equal(t, models.CollisionStatusResolved, row.Status)
+					if tc.existingTarget {
+						require.Equal(t, models.CollisionResolutionAdoptCanonical, row.Resolution)
+					} else {
+						require.Equal(t, models.CollisionResolutionReassign, row.Resolution)
+					}
+				case row.Field == models.CreditFieldReportedThumb && row.ReportedValue == "target-thumb":
+					require.Equal(t, target.ThumbURL, row.CanonicalValue)
+					require.Equal(t, models.CollisionStatusResolved, row.Status)
+					require.Equal(t, models.CollisionResolutionAdoptCanonical, row.Resolution)
+				case row.Field == models.CreditFieldReportedThumb && row.ReportedValue == "other-thumb":
+					require.Equal(t, target.ThumbURL, row.CanonicalValue)
+					require.Equal(t, models.CollisionStatusOpen, row.Status)
+				case row.Field == models.CreditFieldCreditedName && row.ReportedValue == "Different Person":
+					require.Equal(t, target.FullName(), row.CanonicalValue)
+					require.Equal(t, models.CollisionStatusOpen, row.Status)
+				default:
+					t.Fatalf("unexpected collision: %+v", row)
+				}
+			}
+			var movieAfter models.Movie
+			require.NoError(t, db.First(&movieAfter, "content_id = ?", source.MovieContentID).Error)
+			require.True(t, movieAfter.RenderDirty)
+			require.EqualValues(t, 1, movieAfter.RenderGeneration)
+		})
+	}
+}
+
+func TestMovieCreditRepositoryReassignReconcilesTransferredCollisions(t *testing.T) {
+	db, _, source, selected := collisionFixture(t)
+	target := models.Actress{FirstName: "Person", LastName: "Reported", ThumbURL: "target-thumb", Verified: true, Origin: ActressOriginUser}
+	require.NoError(t, db.Create(&target).Error)
+	movie := models.Movie{ContentID: source.MovieContentID}
+	require.NoError(t, db.Model(&movie).Association("Actresses").Replace([]models.Actress{{ID: source.ActressID}}))
+	rows := []models.CreditCollision{
+		{CreditID: source.ID, MovieContentID: source.MovieContentID, Field: models.CreditFieldReportedThumb, ReportedValue: "target-thumb", CanonicalValue: "stale", Status: models.CollisionStatusOpen},
+		{CreditID: source.ID, MovieContentID: source.MovieContentID, Field: models.CreditFieldReportedThumb, ReportedValue: "other-thumb", CanonicalValue: "stale", Status: models.CollisionStatusOpen},
+	}
+	for i := range rows {
+		require.NoError(t, db.Create(&rows[i]).Error)
+	}
+	require.NoError(t, NewMovieCreditRepository(db).ReassignCredit(context.Background(), &source, target.ID))
+	credits, err := NewMovieCreditRepository(db).ListByMovie(context.Background(), source.MovieContentID)
+	require.NoError(t, err)
+	require.Len(t, credits, 1)
+	require.Equal(t, target.ID, credits[0].ActressID)
+	var saved []models.CreditCollision
+	require.NoError(t, db.Where("credit_id = ?", credits[0].ID).Find(&saved).Error)
+	require.Len(t, saved, 3)
+	for _, row := range saved {
+		switch row.ReportedValue {
+		case selected.ReportedValue:
+			require.Equal(t, target.FullName(), row.CanonicalValue)
+			require.Equal(t, models.CollisionStatusResolved, row.Status)
+			require.Equal(t, models.CollisionResolutionAdoptCanonical, row.Resolution)
+		case "target-thumb":
+			require.Equal(t, target.ThumbURL, row.CanonicalValue)
+			require.Equal(t, models.CollisionStatusResolved, row.Status)
+		case "other-thumb":
+			require.Equal(t, target.ThumbURL, row.CanonicalValue)
+			require.Equal(t, models.CollisionStatusOpen, row.Status)
+		default:
+			t.Fatalf("unexpected collision: %+v", row)
+		}
+	}
+	var movieAfter models.Movie
+	require.NoError(t, db.First(&movieAfter, "content_id = ?", source.MovieContentID).Error)
+	require.True(t, movieAfter.RenderDirty)
+	require.EqualValues(t, 1, movieAfter.RenderGeneration)
+}
+
+func TestCollisionServiceReassignRollsBackCollisionReconciliation(t *testing.T) {
+	db, service, source, selected := collisionFixture(t)
+	target := models.Actress{FirstName: "Target", Verified: true, Origin: ActressOriginUser}
+	require.NoError(t, db.Create(&target).Error)
+	movie := models.Movie{ContentID: source.MovieContentID}
+	require.NoError(t, db.Model(&movie).Association("Actresses").Replace([]models.Actress{{ID: source.ActressID}}))
+	extra := models.CreditCollision{
+		CreditID: source.ID, MovieContentID: source.MovieContentID, Field: models.CreditFieldCreditedName,
+		ReportedValue: "Other Person", CanonicalValue: "stale", Status: models.CollisionStatusOpen,
+	}
+	require.NoError(t, db.Create(&extra).Error)
+	require.NoError(t, db.Exec("CREATE TRIGGER fail_reassign_collision_reconcile BEFORE UPDATE OF canonical_value ON credit_collisions BEGIN SELECT RAISE(ABORT, 'injected'); END").Error)
+	t.Cleanup(func() { _ = db.Exec("DROP TRIGGER fail_reassign_collision_reconcile").Error })
+
+	_, err := service.Resolve(context.Background(), selected.ID, models.CollisionResolutionReassign, target.ID)
+	require.Error(t, err)
+	var savedSelected models.CreditCollision
+	require.NoError(t, db.First(&savedSelected, selected.ID).Error)
+	require.Equal(t, models.CollisionStatusOpen, savedSelected.Status)
+	require.Empty(t, savedSelected.Resolution)
+	var savedExtra models.CreditCollision
+	require.NoError(t, db.First(&savedExtra, extra.ID).Error)
+	require.Equal(t, source.ID, savedExtra.CreditID)
+	var savedCredit models.MovieCredit
+	require.NoError(t, db.First(&savedCredit, source.ID).Error)
+	require.Equal(t, source.ActressID, savedCredit.ActressID)
+	var targetCredits int64
+	require.NoError(t, db.Model(&models.MovieCredit{}).Where("movie_content_id = ? AND actress_id = ?", source.MovieContentID, target.ID).Count(&targetCredits).Error)
+	require.Zero(t, targetCredits)
+	var actressIDs []uint
+	require.NoError(t, db.Table("movie_actresses").Where("movie_content_id = ?", source.MovieContentID).Pluck("actress_id", &actressIDs).Error)
+	require.ElementsMatch(t, []uint{source.ActressID}, actressIDs)
+}
+
+func TestCollisionServiceSuppressionRestoreReconcilesRescrapedEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		pinned bool
+	}{
+		{name: "unpinned"},
+		{name: "pinned", pinned: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newCreditTestDB(t)
+			repos := db.Repositories()
+			actress := models.Actress{DMMID: 7001, FirstName: "Canonical", LastName: "Person", ThumbURL: "canonical-thumb", Verified: true, Origin: ActressOriginUser}
+			require.NoError(t, repos.ActressRepo.Create(context.Background(), &actress))
+			first := creditMovie("suppression-restore-"+tc.name, []models.MovieCredit{{
+				CreditedName: "Old Person", ReportedThumbURL: "old-thumb", Source: "dmm",
+				Scraped: models.Actress{DMMID: actress.DMMID, FirstName: "Old", LastName: "Person", ThumbURL: "old-thumb"},
+			}})
+			saved, err := repos.MovieRepo.UpsertWithTranslations(context.Background(), first, nil, nil)
+			require.NoError(t, err)
+			require.Len(t, saved.Credits, 1)
+			creditID := saved.Credits[0].ID
+			collisions, err := repos.CreditCollisionRepo.ListOpenByMovie(context.Background(), first.ContentID)
+			require.NoError(t, err)
+			require.Len(t, collisions, 2)
+			for i := range collisions {
+				if collisions[i].Field == models.CreditFieldCreditedName {
+					require.NoError(t, db.Model(&models.CreditCollision{}).Where("id = ?", collisions[i].ID).Update("user_pinned", tc.pinned).Error)
+				}
+			}
+
+			service := NewCollisionService(db)
+			require.NoError(t, service.SetCreditSuppressed(context.Background(), creditID, true))
+			second := creditMovie(first.ContentID, []models.MovieCredit{{
+				CreditedName: "New Person", ReportedThumbURL: "new-thumb", Source: "javdb",
+				Scraped: models.Actress{DMMID: actress.DMMID, FirstName: "New", LastName: "Person", ThumbURL: "new-thumb"},
+			}})
+			_, err = repos.MovieRepo.UpsertWithTranslations(context.Background(), second, nil, nil)
+			require.NoError(t, err)
+			var storedCredit models.MovieCredit
+			require.NoError(t, db.First(&storedCredit, creditID).Error)
+			require.True(t, storedCredit.Suppressed)
+			require.Equal(t, "New Person", storedCredit.CreditedName)
+			require.Equal(t, "new-thumb", storedCredit.ReportedThumbURL)
+
+			require.NoError(t, service.SetCreditSuppressed(context.Background(), creditID, false))
+			require.NoError(t, db.First(&storedCredit, creditID).Error)
+			require.False(t, storedCredit.Suppressed)
+			var stored []models.CreditCollision
+			require.NoError(t, db.Where("credit_id = ?", creditID).Find(&stored).Error)
+			require.Len(t, stored, 4)
+			for _, collision := range stored {
+				switch collision.ReportedValue {
+				case "Old Person":
+					require.Equal(t, models.CollisionStatusResolved, collision.Status)
+					require.Equal(t, models.CollisionResolutionByRemoval, collision.Resolution)
+					require.Equal(t, tc.pinned, collision.UserPinned)
+				case "old-thumb":
+					require.Equal(t, models.CollisionStatusResolved, collision.Status)
+					require.Equal(t, models.CollisionResolutionByRemoval, collision.Resolution)
+					require.False(t, collision.UserPinned)
+				case "New Person":
+					require.Equal(t, models.CollisionStatusOpen, collision.Status)
+					require.Empty(t, collision.Resolution)
+					require.False(t, collision.UserPinned)
+					require.Equal(t, actress.FullName(), collision.CanonicalValue)
+				case "new-thumb":
+					require.Equal(t, models.CollisionStatusOpen, collision.Status)
+					require.Empty(t, collision.Resolution)
+					require.False(t, collision.UserPinned)
+					require.Equal(t, actress.ThumbURL, collision.CanonicalValue)
+				default:
+					t.Fatalf("unexpected collision: %+v", collision)
+				}
+			}
+			var actressIDs []uint
+			require.NoError(t, db.Table("movie_actresses").Where("movie_content_id = ?", first.ContentID).Pluck("actress_id", &actressIDs).Error)
+			require.ElementsMatch(t, []uint{actress.ID}, actressIDs)
+		})
+	}
+}
+
+func TestCollisionServiceCandidateSuppressionRestoreKeepsProjectionQuarantined(t *testing.T) {
+	db := newCreditTestDB(t)
+	candidate := models.Actress{FirstName: "Candidate", LastName: "Restore", Origin: ActressOriginScrape}
+	require.NoError(t, db.Create(&candidate).Error)
+	movie := models.Movie{ContentID: "candidate-suppression-restore", ID: "candidate-suppression-restore"}
+	require.NoError(t, db.Create(&movie).Error)
+	credit := models.MovieCredit{MovieContentID: movie.ContentID, ActressID: candidate.ID, CreditedName: candidate.FullName(), Origin: string(models.CreditOriginScrape)}
+	require.NoError(t, db.Create(&credit).Error)
+	service := NewCollisionService(db)
+	require.NoError(t, service.SetCreditSuppressed(context.Background(), credit.ID, true))
+	require.NoError(t, service.SetCreditSuppressed(context.Background(), credit.ID, false))
+	var actressIDs []uint
+	require.NoError(t, db.Table("movie_actresses").Where("movie_content_id = ?", movie.ContentID).Pluck("actress_id", &actressIDs).Error)
+	require.Empty(t, actressIDs)
+	var stored models.MovieCredit
+	require.NoError(t, db.First(&stored, credit.ID).Error)
+	require.False(t, stored.Suppressed)
+	var collisionCount int64
+	require.NoError(t, db.Model(&models.CreditCollision{}).Where("credit_id = ?", credit.ID).Count(&collisionCount).Error)
+	require.Zero(t, collisionCount)
+}
+
+func TestCollisionServiceLegacySuppressionRestoreDoesNotCreateCollisions(t *testing.T) {
+	db := newCreditTestDB(t)
+	actress := models.Actress{FirstName: "Legacy", LastName: "Identity", ThumbURL: "canonical-thumb", Verified: true, Origin: ActressOriginUser}
+	require.NoError(t, db.Create(&actress).Error)
+	movie := models.Movie{ContentID: "legacy-suppression-restore", ID: "legacy-suppression-restore"}
+	require.NoError(t, db.Create(&movie).Error)
+	credit := models.MovieCredit{MovieContentID: movie.ContentID, ActressID: actress.ID, CreditedName: "Old Legacy", ReportedThumbURL: "old-thumb", LegacyInferred: true, Origin: string(models.CreditOriginUser)}
+	require.NoError(t, db.Create(&credit).Error)
+	service := NewCollisionService(db)
+	require.NoError(t, service.SetCreditSuppressed(context.Background(), credit.ID, true))
+	require.NoError(t, service.SetCreditSuppressed(context.Background(), credit.ID, false))
+	var collisionCount int64
+	require.NoError(t, db.Model(&models.CreditCollision{}).Where("credit_id = ?", credit.ID).Count(&collisionCount).Error)
+	require.Zero(t, collisionCount)
+	var actressIDs []uint
+	require.NoError(t, db.Table("movie_actresses").Where("movie_content_id = ?", movie.ContentID).Pluck("actress_id", &actressIDs).Error)
+	require.ElementsMatch(t, []uint{actress.ID}, actressIDs)
+}
+
+func TestCollisionServiceAdoptedThumbnailSurvivesImport(t *testing.T) {
+	db, service, credit, collision := collisionFixture(t)
+	require.NoError(t, db.Model(&models.Actress{}).Where("id = ?", credit.ActressID).Update("origin", ActressOriginScrape).Error)
+	collision.Field = models.CreditFieldReportedThumb
+	collision.ReportedValue = "adopted-thumb"
+	collision.CanonicalValue = "old-thumb"
+	require.NoError(t, db.Save(&collision).Error)
+	_, err := service.Resolve(context.Background(), collision.ID, models.CollisionResolutionAdoptCanonical, 0)
+	require.NoError(t, err)
+	incoming := models.Actress{ID: credit.ActressID, FirstName: "Imported", LastName: "Name", JapaneseName: "輸入", ThumbURL: "import-thumb"}
+	require.NoError(t, service.Actresses.ImportUpsert(context.Background(), &incoming))
+	var stored models.Actress
+	require.NoError(t, db.First(&stored, credit.ActressID).Error)
+	require.Equal(t, "adopted-thumb", stored.ThumbURL)
+	require.Equal(t, ActressOriginUser, stored.Origin)
+	require.Equal(t, "Truth", stored.FirstName)
+	require.Equal(t, "Original", stored.LastName)
+}
+
 func TestCollisionServiceAdoptCanonicalReconcilesSiblingCollisions(t *testing.T) {
 	db, service, credit, collision := collisionFixture(t)
 	require.NoError(t, db.Model(&models.Actress{}).Where("id = ?", credit.ActressID).Update("thumb_url", "https://example.com/old.jpg").Error)
@@ -325,7 +665,7 @@ func TestCollisionServiceOverrideAndSuppression(t *testing.T) {
 	require.NoError(t, db.First(&collision, collision.ID).Error)
 	require.Equal(t, models.CollisionStatusOpen, collision.Status)
 	require.Empty(t, collision.Resolution)
-	require.True(t, collision.UserPinned)
+	require.False(t, collision.UserPinned)
 	require.NoError(t, db.First(&historical, historical.ID).Error)
 	require.Equal(t, models.CollisionResolutionByRemoval, historical.Resolution)
 	require.Equal(t, models.CollisionStatusResolved, historical.Status)

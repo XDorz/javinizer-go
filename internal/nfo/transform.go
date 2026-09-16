@@ -285,20 +285,11 @@ func (g *Generator) creditAwareActors() bool {
 // resolveCreditDisplayName resolves the D8 precedence chain:
 // override_name > credited_name (when use_credited_name and not forced-canonical) > identity canonical.
 func (g *Generator) resolveCreditDisplayName(credit models.MovieCredit) string {
-	if credit.UserOverride && strings.TrimSpace(credit.OverrideName) != "" {
-		return strings.TrimSpace(credit.OverrideName)
+	canonical := ""
+	if credit.Actress != nil {
+		canonical = g.formatActressName(*credit.Actress)
 	}
-	actress := credit.Actress
-	if !credit.DisplayForceCanonical && g.config.UseCreditedName && strings.TrimSpace(credit.CreditedName) != "" {
-		return strings.TrimSpace(credit.CreditedName)
-	}
-	if actress != nil {
-		return g.formatActressName(*actress)
-	}
-	if strings.TrimSpace(credit.CreditedName) != "" {
-		return strings.TrimSpace(credit.CreditedName)
-	}
-	return ""
+	return credit.RenderName(g.config.UseCreditedName, canonical)
 }
 
 // buildActorsFromCredits renders actors from credit records, preserving cast order.

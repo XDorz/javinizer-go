@@ -31,16 +31,17 @@ type applyOrchestrator interface {
 // eliminated — the orchestrator always receives real dependencies (or no-ops), so nil-checks
 // are honest checks for optional features, not defensive nil guards.
 type applyOrchImpl struct {
-	fs             afero.Fs
-	organizer      organizer.OrganizerInterface
-	downloader     downloader.DownloaderInterface
-	nfoGen         nfo.GeneratorInterface
-	nfo            nfo.NFOFileMerger
-	applyCfg       ApplyConfig
-	templateEngine template.EngineInterface
-	revertLog      RevertLog
-	tagRepo        database.MovieTagRepositoryInterface
-	logger         logging.Logger
+	fs               afero.Fs
+	organizer        organizer.OrganizerInterface
+	downloader       downloader.DownloaderInterface
+	nfoGen           nfo.GeneratorInterface
+	nfo              nfo.NFOFileMerger
+	applyCfg         ApplyConfig
+	templateEngine   template.EngineInterface
+	revertLog        RevertLog
+	tagRepo          database.MovieTagRepositoryInterface
+	logger           logging.Logger
+	artifactPrepared func()
 }
 
 var _ applyOrchestrator = (*applyOrchImpl)(nil)
@@ -144,6 +145,19 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 		}, beginErr
 	}
 
+	artifact, stagedCmd, artifactErr := o.prepareArtifact(ctx, cmd)
+	if artifactErr != nil {
+		markArtifactDirty(cmd)
+		if o.revertLog != nil && opID != "" {
+			_ = o.revertLog.CompleteFailed(ctx, opID, &ApplyResult{Movie: cmd.Movie, OperationID: opID, PrePublication: true})
+		}
+		return &ApplyResult{Movie: cmd.Movie, OperationID: opID, FailedStep: "artifact_staging", PrePublication: true}, artifactErr
+	}
+	if artifact != nil {
+		defer artifact.cleanup()
+		cmd = stagedCmd
+	}
+
 	movie := cmd.Movie
 	targetDir := cmd.DestPath
 
@@ -154,6 +168,7 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 		movie:          movie,
 		targetDir:      targetDir,
 		finalDir:       targetDir,
+		artifact:       artifact,
 		organizeResult: nil,
 		merged:         false,
 		foundNFOPath:   "",
@@ -179,7 +194,10 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 	// probes as anchor_missing forever, holding the batch off fully-reverted —
 	// or worse, journaling a shared intent path a promoted claimant publishes.
 	onStepFail := func(stepName string, failMsg string, stepErr error, stepsSoFar stepCompletion) onStepFailResult {
-		prePub := stepName == "organize" && (state.organizeResult == nil || state.organizeResult.PrePublication)
+		prePub := artifact != nil || (stepName == "organize" && (state.organizeResult == nil || state.organizeResult.PrePublication))
+		if artifact != nil {
+			markArtifactDirty(artifact.original)
+		}
 		o.completeRevertLogWithState(ctx, opID, state, prePub)
 		return onStepFailResult{
 			result: &ApplyResult{
@@ -279,6 +297,25 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 	failResult, failErr := o.executeSteps(ctx, pipelineSteps, &steps, onStepFail, dupGate)
 	if failResult != nil {
 		return failResult, failErr
+	}
+
+	if artifact != nil {
+		if o.artifactPrepared != nil {
+			o.artifactPrepared()
+		}
+		if err := artifact.publish(ctx, o, state, &steps); err != nil {
+			markArtifactDirty(artifact.original)
+			o.completeRevertLogWithState(ctx, opID, state, true)
+			return &ApplyResult{
+				OrganizeResult: state.organizeResult,
+				Movie:          state.movie,
+				DownloadPaths:  state.downloadPaths,
+				NFOPath:        state.nfoPath,
+				OperationID:    opID,
+				Steps:          steps,
+				FailedStep:     "artifact_publication",
+			}, fmt.Errorf("artifact publication failed: %w", err)
+		}
 	}
 
 	// Step 6: Complete revert log AFTER all filesystem mutations succeed.
@@ -412,8 +449,16 @@ func (o *applyOrchImpl) stepMerge(cmd ApplyCmd, state *applyPipelineState, steps
 		preBounds = state.movie.Poster.PosterCropBounds
 		preFull = state.movie.Poster.PosterCropSourceFull
 	}
+	mergeMatch := cmd.Match
+	if state.artifact != nil {
+		var matchErr error
+		mergeMatch, matchErr = state.artifact.mergeMatch(state, mergeMatch)
+		if matchErr != nil {
+			return matchErr
+		}
+	}
 	mergeRes := o.nfo.MergeWithExistingNFO(state.movie, nfo.MergeWithExistingOptions{
-		Match:          cmd.Match,
+		Match:          mergeMatch,
 		ForceOverwrite: cmd.Merge.ForceOverwrite,
 		PreserveNFO:    cmd.Merge.PreserveNFO,
 		ScalarStrategy: cmd.Merge.ScalarStrategy,
@@ -483,12 +528,12 @@ func (o *applyOrchImpl) stepDownload(ctx context.Context, cmd ApplyCmd, opID Ope
 	// as the discovery root pre-download; a DESTRUCTIVE run must never
 	// proceed with an unseeded discovery path (the startup sweep would be
 	// blind to a pre-journal crash window there).
-	if rl, ok := o.revertLog.(*dbRevertLog); ok && opID != "" && state.finalDir != "" {
+	if rl, ok := o.revertLog.(*dbRevertLog); ok && opID != "" && state.finalDir != "" && state.artifact == nil {
 		if sErr := rl.seedRoot(ctx, opID, state.finalDir); sErr != nil && cmd.OverwriteExistingMedia {
 			return fmt.Errorf("discovery-root seed failed for overwrite run: %w", sErr)
 		}
 	}
-	outcome, dlErr := o.downloader.Download(ctx, downloader.DownloadCmd{
+	downloadCmd := downloader.DownloadCmd{
 		Movie:                  downloadMovie,
 		DestDir:                state.finalDir,
 		Multipart:              multipart,
@@ -497,9 +542,12 @@ func (o *applyOrchImpl) stepDownload(ctx context.Context, cmd ApplyCmd, opID Ope
 		Dedup:                  cmd.Dedup,
 		DedupOwnerKey:          cmd.DedupOwnerKey,
 		DedupLogicalKey:        cmd.DedupLogicalKey,
-		OperationID:            opID,
-		Recorder:               replacementRecorder(o.revertLog),
-	})
+	}
+	if state.artifact == nil {
+		downloadCmd.OperationID = opID
+		downloadCmd.Recorder = replacementRecorder(o.revertLog)
+	}
+	outcome, dlErr := o.downloader.Download(ctx, downloadCmd)
 	if dlErr != nil {
 		if outcome != nil {
 			state.downloadPaths = outcome.CreatedPaths
@@ -582,6 +630,7 @@ type applyPipelineState struct {
 	downloadPaths    []string
 	nfoPath          string
 	scrapedMediaURLs *scrapedMediaSnapshot
+	artifact         *artifactStage
 }
 
 // completeRevertLogWithState marks an in-progress revert operation as failed,

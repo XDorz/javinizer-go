@@ -728,6 +728,7 @@ func (s *JobStore) GetBatchJob(id string) (BatchJobInterface, bool) {
 	}
 	a := job.getAdapters()
 	return &batchJobAdapter{
+		results:         job.Results(),
 		JobReader:       a.reader,
 		MovieLookup:     a.movieLookup,
 		PhaseController: a.phaseController,

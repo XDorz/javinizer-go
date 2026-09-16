@@ -215,7 +215,7 @@ func upsertMovieCore(tx *gorm.DB, db *DB, movie *models.Movie, translations []mo
 
 func upsertMovieCoreWithActressTranslationIDs(tx *gorm.DB, db *DB, movie *models.Movie, translations []models.MovieTranslation, genreTranslations []models.GenreTranslationData, actressTranslations []models.ActressTranslationData, actressTranslationIDs map[int]uint) error {
 	// Step 1: GORM upsert the movie record (without associations)
-	if err := tx.Omit("Actresses", "Genres", "Translations").Save(movie).Error; err != nil {
+	if err := tx.Omit("Actresses", "Genres", "Translations", "RenderDirty", "RenderGeneration").Save(movie).Error; err != nil {
 		return err
 	}
 

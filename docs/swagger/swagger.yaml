@@ -819,6 +819,8 @@ definitions:
         items:
           $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ActressView'
         type: array
+      cast_version:
+        type: string
       code:
         description: Canonical JAV code (e.g., "IPX-535"). Renamed from content_id.
         example: IPX-535

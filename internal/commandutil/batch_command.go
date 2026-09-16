@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/javinizer/javinizer-go/internal/database"
 	"io"
 	"path/filepath"
 	"sync"
@@ -527,7 +528,8 @@ func newCLIBatchRuntime(bs *bootstrapResult, cfg *config.Config, opts BatchComma
 	}
 	jobStore := worker.NewJobStore(repos.JobRepo, repos.BatchFileOpRepo, repos.MovieRepo, cfg.System.TempDir, nil, nil, storeOpts...)
 	emitter := eventlog.NewEmitter(repos.EventRepo)
-	factory := worker.NewBatchJobFactory(jobStore, jobWF, bs.Matcher, bs.PosterGen, batchCfg, emitter)
+	publicationFence, _ := repos.MovieRepo.(database.ApplyPublicationFencer)
+	factory := worker.NewBatchJobFactory(jobStore, jobWF, bs.Matcher, bs.PosterGen, batchCfg, emitter, publicationFence)
 	// Persisted job identity at creation (#248 codex P2, F1): mirror the API
 	// StartScrapeUseCase wiring so a CLI update batch's jobs row classifies as
 	// update (update=true + metadata-artwork) instead of organize. StartApply

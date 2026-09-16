@@ -84,6 +84,20 @@ func (c *MovieCredit) IsScrapeOwned() bool {
 	return c.Origin != string(CreditOriginUser) && !c.UserOverride && !c.Suppressed
 }
 
+// RenderName selects an override, credited name, or canonical name according to display settings.
+func (c MovieCredit) RenderName(useCredited bool, canonical string) string {
+	if c.UserOverride && strings.TrimSpace(c.OverrideName) != "" {
+		return strings.TrimSpace(c.OverrideName)
+	}
+	if useCredited && !c.DisplayForceCanonical && strings.TrimSpace(c.CreditedName) != "" {
+		return strings.TrimSpace(c.CreditedName)
+	}
+	if canonical != "" {
+		return canonical
+	}
+	return strings.TrimSpace(c.CreditedName)
+}
+
 // DisplayName resolves the override, canonical, or credited name.
 func (c *MovieCredit) DisplayName(actress *Actress) string {
 	if c.UserOverride && strings.TrimSpace(c.OverrideName) != "" {

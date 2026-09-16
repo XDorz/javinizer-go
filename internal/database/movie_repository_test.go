@@ -142,6 +142,16 @@ func TestMovieRepository_FindByID(t *testing.T) {
 		assert.Equal(t, "IPX-020", found.ID)
 	})
 
+	t.Run("Find by content ID fallback", func(t *testing.T) {
+		movie := createTestMovie("IPX-021")
+		require.NoError(t, repo.Create(context.TODO(), movie))
+
+		found, err := repo.FindByID(context.TODO(), movie.ContentID)
+		require.NoError(t, err)
+		assert.Equal(t, movie.ID, found.ID)
+		assert.Equal(t, movie.ContentID, found.ContentID)
+	})
+
 	t.Run("Find non-existent movie", func(t *testing.T) {
 		_, err := repo.FindByID(context.TODO(), "NONEXISTENT-999")
 		assert.Error(t, err)

@@ -125,4 +125,18 @@ describe('rebaseOverlayOntoMovie (codex P1)', () => {
 		const out = rebaseOverlayOntoMovie(baseline, overlay, fresh);
 		expect((out as unknown as Record<string, unknown>).content_id).toBe('cid-x');
 	});
+
+	describe('authoritative cast generation rebase', () => {
+		it('keeps fresh cast generation while preserving safe metadata edits', () => {
+			const baseline = makeMovie({ cast_version: 'cast-v1', actresses: [{ id: 1 }], updated_at: 'old-time' });
+			const overlay = makeMovie({ cast_version: 'stale-cast', actresses: [{ id: 9 }], maker: 'User Maker' });
+			const fresh = makeMovie({ cast_version: 'cast-v2', actresses: [{ id: 2 }], updated_at: 'new-time', title: 'Canonical Title' });
+			const out = rebaseOverlayOntoMovie(baseline, overlay, fresh);
+			expect(out.cast_version).toBe('cast-v2');
+			expect(out.actresses).toEqual([{ id: 2 }]);
+			expect(out.maker).toBe('User Maker');
+			expect(out.updated_at).toBe('new-time');
+			expect(out.title).toBe('Canonical Title');
+		});
+	});
 });

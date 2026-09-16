@@ -418,6 +418,12 @@ func (r *ActressRepository) CountCandidates(ctx context.Context) (int64, error) 
 // PromoteCandidate marks a quarantined candidate as a verified user-owned
 // identity with the user-confirmed canonical fields.
 func (r *ActressRepository) PromoteCandidate(ctx context.Context, id uint, firstName, lastName, japaneseName, thumbURL string) error {
+	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return promoteCandidateTx(tx, id, firstName, lastName, japaneseName, thumbURL)
+	})
+}
+
+func promoteCandidateTx(tx *gorm.DB, id uint, firstName, lastName, japaneseName, thumbURL string) error {
 	updates := map[string]interface{}{
 		"verified":      true,
 		"origin":        ActressOriginUser,
@@ -426,31 +432,29 @@ func (r *ActressRepository) PromoteCandidate(ctx context.Context, id uint, first
 		colJapaneseName: japaneseName,
 		"thumb_url":     thumbURL,
 	}
-	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var candidate models.Actress
-		if err := tx.First(&candidate, id).Error; err != nil {
-			return wrapDBErr("promote", fmt.Sprintf("candidate %d", id), err)
-		}
-		previousName := canonicalActressName(&candidate)
-		promotedName := canonicalActressName(&models.Actress{
-			FirstName:    firstName,
-			LastName:     lastName,
-			JapaneseName: japaneseName,
-		})
-
-		if err := tx.Model(&models.Actress{}).Where("id = ?", id).Updates(updates).Error; err != nil {
-			return wrapDBErr("promote", fmt.Sprintf("candidate %d", id), err)
-		}
-		if previousName != "" && !strings.EqualFold(previousName, promotedName) {
-			if err := upsertActressAliases(tx, collectActressAliasCandidates(&candidate), promotedName); err != nil {
-				return wrapDBErr("promote", fmt.Sprintf("aliases for candidate %d", id), err)
-			}
-		}
-		if err := resolveCandidateIdentityCollisionsTx(tx, id); err != nil {
-			return err
-		}
-		return restoreActressProjectionTx(tx, id)
+	var candidate models.Actress
+	if err := tx.First(&candidate, id).Error; err != nil {
+		return wrapDBErr("promote", fmt.Sprintf("candidate %d", id), err)
+	}
+	previousName := canonicalActressName(&candidate)
+	promotedName := canonicalActressName(&models.Actress{
+		FirstName:    firstName,
+		LastName:     lastName,
+		JapaneseName: japaneseName,
 	})
+
+	if err := tx.Model(&models.Actress{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+		return wrapDBErr("promote", fmt.Sprintf("candidate %d", id), err)
+	}
+	if previousName != "" && !strings.EqualFold(previousName, promotedName) {
+		if err := upsertActressAliases(tx, collectActressAliasCandidates(&candidate), promotedName); err != nil {
+			return wrapDBErr("promote", fmt.Sprintf("aliases for candidate %d", id), err)
+		}
+	}
+	if err := resolveCandidateIdentityCollisionsTx(tx, id); err != nil {
+		return err
+	}
+	return restoreActressProjectionTx(tx, id)
 }
 
 // SetUserOwned marks an identity as user-owned so curated imports cannot

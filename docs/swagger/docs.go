@@ -5676,6 +5676,9 @@ const docTemplate = `{
                         "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ActressView"
                     }
                 },
+                "cast_version": {
+                    "type": "string"
+                },
                 "code": {
                     "description": "Canonical JAV code (e.g., \"IPX-535\"). Renamed from content_id.",
                     "type": "string",

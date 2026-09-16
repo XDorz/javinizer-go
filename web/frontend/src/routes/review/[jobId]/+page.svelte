@@ -362,7 +362,7 @@
 							{#if s.currentMovie?.code}
 								<CollisionPanel
 									movieContentId={s.currentMovie.code}
-									onResolved={() => s.refreshAfterCollision()}
+									onResolved={(_, movieContentId) => s.refreshAfterCollision(movieContentId)}
 								/>
 							{/if}
 

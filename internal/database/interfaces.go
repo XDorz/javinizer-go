@@ -21,6 +21,16 @@ type MovieRepositoryInterface interface {
 	List(ctx context.Context, limit, offset int) ([]models.Movie, error)
 }
 
+// ApplyPublicationFencer validates a movie generation while publishing under a database transaction.
+type ApplyPublicationFencer interface {
+	WithApplyPublicationFence(ctx context.Context, contentID string, expectedGeneration int64, publish func(*models.Movie) error) error
+}
+
+// ApplyArtifactPublicationFencer admits artifact publication only when generation and collision state allow it.
+type ApplyArtifactPublicationFencer interface {
+	WithApplyArtifactPublicationFence(ctx context.Context, contentID string, expectedGeneration int64, publish func(*models.Movie) error) error
+}
+
 // ActressRepositoryInterface defines the contract for actress database operations
 type ActressRepositoryInterface interface {
 	Create(ctx context.Context, actress *models.Actress) error

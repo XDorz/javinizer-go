@@ -58,7 +58,6 @@ import { nextOrganizeProgress } from '$lib/utils/job-progress';
 import { createReviewMutations } from './review-mutations.svelte';
 import {
 	buildMovieOverride,
-	mergePersistedMovieIntoBatchJob,
 	rebaseOverlayOntoMovie,
 } from './save-helpers';
 import { clearCropGeometry, siblingResultFilePaths } from './poster-crop-sync';
@@ -339,7 +338,11 @@ export function createReviewState(getJobId: () => string) {
 	let loading = $derived(loadPhase === 'loading');
 	let error = $derived(loadPhase === 'error' ? currentLoadError : null);
 	let refreshLoadError = $derived(formatReviewLoadError(jobQuery.error, m.review_refresh_error()));
-	let refreshError = $derived(loadPhase === 'refresh-error' ? refreshLoadError : null);
+	let collisionRefreshError = $state<string | null>(null);
+	let collisionRefreshPending = $state(false);
+	let refreshError = $derived(
+		collisionRefreshError ?? (loadPhase === 'refresh-error' ? refreshLoadError : null),
+	);
 
 	const configQuery = createConfigQuery();
 	let config = $derived(configQuery.data ?? null);
@@ -725,6 +728,12 @@ export function createReviewState(getJobId: () => string) {
 		getCropMetrics: () => cropMetrics,
 		getCropBox: () => cropBox,
 		getQueryClient: () => queryClient,
+		onRefreshFailure: (error) => {
+			collisionRefreshError = error instanceof Error ? error.message : m.review_refresh_error();
+		},
+		onRefreshSuccess: () => {
+			collisionRefreshError = null;
+		},
 		getCurrentMovieIndex: () => currentMovieIndex,
 		setCurrentMovieIndex: (index) => {
 			currentMovieIndex = index;
@@ -1138,6 +1147,7 @@ export function createReviewState(getJobId: () => string) {
 	}
 
 	async function saveAllEdits() {
+		if (collisionRefreshPending || collisionRefreshError) return;
 		const targetJobId = activeJobId();
 		const targetGeneration = activeGeneration();
 		await runForJob(targetJobId, () =>
@@ -1918,55 +1928,69 @@ export function createReviewState(getJobId: () => string) {
 		posterCropController.cleanup();
 	});
 
-	async function refreshAfterCollision(): Promise<void> {
+	let collisionRefreshToken = 0;
+
+	async function refreshAfterCollision(movieContentId: string): Promise<void> {
 		const targetJobId = jobId;
 		const targetGeneration = routeGeneration;
+		const refreshToken = ++collisionRefreshToken;
+		const targetMovieKey = movieContentId.trim().toLowerCase();
 		const baselineJob = job;
-		const targetResult = currentResult;
-		const lookupKeys = [
-			targetResult?.movie_id,
-			targetResult?.movie?.id,
-			targetResult?.movie?.code,
-			targetResult?.movie?.content_id,
-		].filter((value): value is string => Boolean(value));
+		const targetFilePaths = Object.entries(baselineJob?.results ?? {})
+			.filter(([, result]) =>
+				[
+					result.movie_id,
+					result.movie?.id,
+					result.movie?.code,
+					result.movie?.content_id,
+				].some(
+					(value) => typeof value === 'string' && value.trim().toLowerCase() === targetMovieKey,
+				),
+			)
+			.map(([filePath]) => filePath);
 		const overlays = Array.from(editedMovies.entries());
+		collisionRefreshError = null;
+		collisionRefreshPending = true;
 
 		try {
 			const refreshed = await jobQuery.refetch({ cancelRefetch: true });
-			if (jobId !== targetJobId || routeGeneration !== targetGeneration) return;
-			if (!refreshed.data || refreshed.data.id !== targetJobId) return;
+			if (jobId !== targetJobId || routeGeneration !== targetGeneration || refreshToken !== collisionRefreshToken) return;
+			if (refreshed.error) {
+				collisionRefreshError =
+					refreshed.error instanceof Error ? refreshed.error.message : m.review_refresh_error();
+				return;
+			}
+			if (!refreshed.data || refreshed.data.id !== targetJobId) {
+				collisionRefreshError = m.review_refresh_error();
+				return;
+			}
 
 			const nextJob = JSON.parse(JSON.stringify(refreshed.data)) as BatchJobResponse;
-			if (lookupKeys.length > 0) {
-				let persistedMovie: Movie | null = null;
-				for (const lookupKey of lookupKeys) {
-					try {
-						persistedMovie = await apiClient.getMovie(lookupKey);
-						break;
-					} catch {
-						continue;
-					}
-				}
-				if (!persistedMovie) return;
-				if (jobId !== targetJobId || routeGeneration !== targetGeneration) return;
-				mergePersistedMovieIntoBatchJob(nextJob, lookupKeys, persistedMovie);
+			if (targetFilePaths.length > 0 && !targetFilePaths.some((filePath) => nextJob.results[filePath])) {
+				collisionRefreshError = m.review_refresh_error();
+				return;
 			}
 			if (baselineJob) {
 				for (const [filePath, overlay] of overlays) {
 					const baselineMovie = baselineJob.results[filePath]?.movie;
 					const freshMovie = nextJob.results[filePath]?.movie;
+					if (editedMovies.get(filePath) !== overlay) continue;
 					if (baselineMovie && freshMovie) {
 						editedMovies.set(filePath, rebaseOverlayOntoMovie(baselineMovie, overlay, freshMovie));
 					}
 				}
 			}
+			if (jobId !== targetJobId || routeGeneration !== targetGeneration || refreshToken !== collisionRefreshToken) return;
+			collisionRefreshError = null;
 			skipJobSync = true;
 			job = nextJob;
-		} catch {
-			return;
+		} catch (error) {
+			if (jobId !== targetJobId || routeGeneration !== targetGeneration || refreshToken !== collisionRefreshToken) return;
+			collisionRefreshError = error instanceof Error ? error.message : m.review_refresh_error();
+		} finally {
+			if (refreshToken === collisionRefreshToken) collisionRefreshPending = false;
 		}
 	}
-
 	return {
 		get job() {
 			return job;
@@ -1981,6 +2005,7 @@ export function createReviewState(getJobId: () => string) {
 			return refreshError;
 		},
 		retryLoad() {
+			collisionRefreshError = null;
 			void jobQuery.refetch({ cancelRefetch: true });
 		},
 		refreshAfterCollision,

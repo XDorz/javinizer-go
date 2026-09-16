@@ -46,9 +46,9 @@ export function rebaseOverlayOntoMovie(baseline: Movie, overlay: Movie, fresh: M
 	const overRec = overlay as unknown as Record<string, unknown>;
 	for (const key of Object.keys(overRec)) {
 		const value = overRec[key];
-		// codex cloud P2: a key PRESENT with undefined is an explicit user
-		// clear (e.g. date removal). Skipping it resurrects the server value
-		// on rebase; compare-with-baseline preserves the clear on retry.
+		if (key === 'cast_version') continue;
+		if (key === 'actresses' && baseRec.cast_version !== fresh.cast_version) continue;
+		if (!Object.prototype.hasOwnProperty.call(baseRec, key)) continue;
 		if (value === undefined) {
 			if (baseRec[key] !== undefined) {
 				(rebased as unknown as Record<string, unknown>)[key] = undefined;

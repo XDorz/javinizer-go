@@ -280,9 +280,10 @@ func recoverRunPanic(inputs applyPhaseInputs, r any) {
 	inputs.Lifecycle.MarkFailed()
 }
 
-func refreshApplyMovieIdentity(ctx context.Context, repo database.MovieRepositoryInterface, results map[string]*resultstore.MovieResult) {
+func refreshApplyMovieIdentity(ctx context.Context, repo database.MovieRepositoryInterface, results map[string]*resultstore.MovieResult) map[string]bool {
+	known := make(map[string]bool)
 	if repo == nil {
-		return
+		return known
 	}
 	persistedByContentID := make(map[string]*models.Movie)
 	for _, fileResult := range results {
@@ -317,7 +318,10 @@ func refreshApplyMovieIdentity(ctx context.Context, repo database.MovieRepositor
 		refreshed := persisted.Clone()
 		fileResult.Movie.Actresses = refreshed.Actresses
 		fileResult.Movie.Credits = refreshed.Credits
+		fileResult.Movie.RenderGeneration = refreshed.RenderGeneration
+		known[strings.TrimSpace(fileResult.Movie.ContentID)] = true
 	}
+	return known
 }
 
 // Run executes the apply phase: setup errgroup → iterate files → dispatch
@@ -338,7 +342,7 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 		}
 	}()
 
-	refreshApplyMovieIdentity(ctx, inputs.MovieRepo, inputs.Results)
+	inputs.PersistedMovies = refreshApplyMovieIdentity(ctx, inputs.MovieRepo, inputs.Results)
 
 	excludedSnapshot := make(map[string]bool, len(inputs.Results))
 	for filePath := range inputs.Results {
@@ -713,8 +717,15 @@ func buildApplyCmd(
 		}
 	}
 
+	publicationFence := inputs.PublicationFence
+	if publicationFence == nil && inputs.MovieRepo != nil {
+		publicationFence, _ = inputs.MovieRepo.(database.ApplyPublicationFencer)
+	}
+
 	applyCmd := workflow.ApplyCmd{
 		Movie:                  movie,
+		PublicationFence:       publicationFence,
+		PersistedMovie:         inputs.PersistedMovies[strings.TrimSpace(movie.ContentID)],
 		Match:                  match,
 		DestPath:               destPath,
 		DryRun:                 cfg.DryRun,
@@ -733,11 +744,13 @@ func buildApplyCmd(
 	applyCmd.GenerateNFO = cfg.GenerateNFO && (inputs.NFOEnabled || cfg.ForceNFO)
 
 	afc := &ApplyFileContext{
-		FilePath:    filePath,
-		Movie:       movie,
-		MovieResult: fileResult,
-		Match:       match,
-		Destination: destPath,
+		FilePath:              filePath,
+		Movie:                 movie,
+		MovieResult:           fileResult,
+		PublicationGeneration: movie.RenderGeneration,
+		PersistedMovie:        applyCmd.PersistedMovie,
+		Match:                 match,
+		Destination:           destPath,
 	}
 
 	if cfg.PreApplyFunc != nil {
@@ -837,56 +850,58 @@ func interpretApplyResult(
 		} else if !writebackPreSkipped(inputs.Updater, movie, filePath, "Apply") {
 			// R10-6: state+provenance publish under ONE acquisition — a persist
 			// snapshot between the two never observes mismatched halves.
-			errUp := inputs.Updater.AtomicUpdateFileResultWithProvenance(filePath, func(current *resultstore.MovieResult, prov *resultstore.ProvenanceData) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
-				if applyWritebackIdentityMismatch(movie, current) {
-					logging.Warnf("[Apply] skipping write-back for %s — result rekeyed to %s mid-phase", filePath, current.FileMatchInfo.MovieID)
-					return current, prov, nil
-				}
-				fm := applyMatchFollowedByLiveIdentity(afc.Match, current)
-				current.FileMatchInfo = fm
-				current.Movie = mergeLiveReviewEdits(movie, movie, current.Movie)
-				current.Status = fileStatus
-				current.Error = errMsg
-				if errorCode != "" && samePosterCropIntent(movie, current.Movie) &&
-					// codex r7 P2: never resurrect a marker whose slot an interim edit
-					// (removal/override) deliberately cleared — in an unmeasured-crop
-					// state the bounds are nil on both sides, so intent alone cannot
-					// distinguish stale from fresh. Only stamp when the row still
-					// carries the mark the apply saw.
-					(afc.MovieResult == nil || current.ErrorCode == afc.MovieResult.ErrorCode) {
-					// codex r7 P2: never resurrect a marker whose slot an interim
-					// edit (removal/override) deliberately cleared — in an
-					// unmeasured-crop state the bounds are nil on both sides, so
-					// intent alone cannot distinguish stale from fresh. Only
-					// stamp when the row still carries the mark the apply saw.
-					baselineCode := ""
-					if afc.MovieResult != nil {
-						baselineCode = afc.MovieResult.ErrorCode
+			errUp := withApplyPublicationFence(taskCtx, inputs, movie, afc, func() error {
+				return inputs.Updater.AtomicUpdateFileResultWithProvenance(filePath, func(current *resultstore.MovieResult, prov *resultstore.ProvenanceData) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
+					if applyWritebackIdentityMismatch(movie, current) {
+						logging.Warnf("[Apply] skipping write-back for %s — result rekeyed to %s mid-phase", filePath, current.FileMatchInfo.MovieID)
+						return current, prov, nil
 					}
-					if current.ErrorCode == baselineCode {
-						current.ErrorCode = errorCode
+					fm := applyMatchFollowedByLiveIdentity(afc.Match, current)
+					current.FileMatchInfo = fm
+					current.Movie = mergeApplyWritebackMovie(movie, movie, current.Movie, afc.MovieResult, current, inputs.MovieRepo != nil)
+					current.Status = fileStatus
+					current.Error = errMsg
+					if errorCode != "" && samePosterCropIntent(movie, current.Movie) &&
+						// codex r7 P2: never resurrect a marker whose slot an interim edit
+						// (removal/override) deliberately cleared — in an unmeasured-crop
+						// state the bounds are nil on both sides, so intent alone cannot
+						// distinguish stale from fresh. Only stamp when the row still
+						// carries the mark the apply saw.
+						(afc.MovieResult == nil || current.ErrorCode == afc.MovieResult.ErrorCode) {
+						// codex r7 P2: never resurrect a marker whose slot an interim
+						// edit (removal/override) deliberately cleared — in an
+						// unmeasured-crop state the bounds are nil on both sides, so
+						// intent alone cannot distinguish stale from fresh. Only
+						// stamp when the row still carries the mark the apply saw.
+						baselineCode := ""
+						if afc.MovieResult != nil {
+							baselineCode = afc.MovieResult.ErrorCode
+						}
+						if current.ErrorCode == baselineCode {
+							current.ErrorCode = errorCode
+						}
 					}
-				}
 
-				// codex r9 P2b: a PARTIAL failure whose poster leg verified must not keep
-				// refusing later overwrite retries as still-unverified. Only clear when
-				// this apply actually installed a fingerprint-matched poster this run
-				// (Steps.PosterVerified), the row actually carries crop bounds to
-				// discharge (r10 P1: a legacy preview-only crop leaves nil bounds, and
-				// a fresh install against nil bounds ran NO fingerprint verification
-				// — marker must persist), and the new failure is a different failure
-				// class (not a fresh recrop refusal from this same download).
-				hasCropToDischarge := current.Movie != nil && current.Movie.Poster.PosterCropBounds != nil
-				if result != nil && result.Steps.PosterVerified && hasCropToDischarge &&
-					errorCode != downloader.PosterRecropRequiredCode &&
-					current.ErrorCode == downloader.PosterRecropRequiredCode {
-					current.ErrorCode = ""
-				}
-				current.StartedAt = startTime
-				current.EndedAt = &now
-				return current, mergeWriteBackProvenance(inputs.Provenance[filePath], prov), nil
+					// codex r9 P2b: a PARTIAL failure whose poster leg verified must not keep
+					// refusing later overwrite retries as still-unverified. Only clear when
+					// this apply actually installed a fingerprint-matched poster this run
+					// (Steps.PosterVerified), the row actually carries crop bounds to
+					// discharge (r10 P1: a legacy preview-only crop leaves nil bounds, and
+					// a fresh install against nil bounds ran NO fingerprint verification
+					// — marker must persist), and the new failure is a different failure
+					// class (not a fresh recrop refusal from this same download).
+					hasCropToDischarge := current.Movie != nil && current.Movie.Poster.PosterCropBounds != nil
+					if result != nil && result.Steps.PosterVerified && hasCropToDischarge &&
+						errorCode != downloader.PosterRecropRequiredCode &&
+						current.ErrorCode == downloader.PosterRecropRequiredCode {
+						current.ErrorCode = ""
+					}
+					current.StartedAt = startTime
+					current.EndedAt = &now
+					return current, mergeWriteBackProvenance(inputs.Provenance[filePath], prov), nil
+				})
 			})
-			if errUp != nil {
+			if errUp != nil && !errors.Is(errUp, errApplyPublicationFence) {
 				upsertWriteBackResultWithProvenance(inputs.Updater, filePath, &resultstore.MovieResult{
 					FileMatchInfo: afc.Match,
 					Movie:         movie,
@@ -953,34 +968,36 @@ func interpretApplyResult(
 				// failed refresh committed and discard its recovery state.
 				logging.Warnf("[Apply] skipping success write-back for %s — promote witness for %s unresolved; restart reconciles", filePath, mid)
 			} else {
-				err2 := inputs.Updater.AtomicUpdateFileResultWithProvenance(filePath, func(current *resultstore.MovieResult, prov *resultstore.ProvenanceData) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
-					if applyWritebackIdentityMismatch(movie, current) {
-						logging.Warnf("[Apply] skipping success write-back for %s — result rekeyed to %s mid-phase", filePath, current.FileMatchInfo.MovieID)
-						return current, prov, nil
-					}
-					current.Movie = mergeLiveReviewEdits(movie, result.Movie, current.Movie)
-					// A successful explicit retry must clear the prior apply failure so
-					// later retries and reloads do not keep treating this row as failed.
-					if current.Status == models.JobStatusFailed {
-						current.Status = models.JobStatusCompleted
-						current.Error = ""
-					}
-					// codex r9 P2: clear the marker only when this retry fetched AND
-					// installed a poster after the download step's verification — Steps.
-					// Downloaded alone also fires on cover/trailer-only or dedup-skipped
-					// runs, which would unsafely clear a recrop refusal that nothing
-					// discharged. Skip-download, dry-run, no-poster-URL, and
-					// overwrite-refused retries all leave PosterVerified=false, so the
-					// stale-geometry gate still fires for a later poster-capable retry.
-					// codex r10 P1: legacy preview-only crops leave nil bounds. A fresh
-					// install against nil bounds ran NO fingerprint verification, so a
-					// marker gated only on PosterVerified would let a stale recrop
-					// block evaporate without ever discharging. Require non-nil bounds.
-					hasCropToDischarge := current.Movie != nil && current.Movie.Poster.PosterCropBounds != nil
-					if current.ErrorCode == downloader.PosterRecropRequiredCode && hasCropToDischarge && result != nil && result.Steps.PosterVerified {
-						current.ErrorCode = ""
-					}
-					return current, mergeWriteBackProvenance(inputs.Provenance[filePath], prov), nil
+				err2 := withApplyPublicationFence(taskCtx, inputs, movie, afc, func() error {
+					return inputs.Updater.AtomicUpdateFileResultWithProvenance(filePath, func(current *resultstore.MovieResult, prov *resultstore.ProvenanceData) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
+						if applyWritebackIdentityMismatch(movie, current) {
+							logging.Warnf("[Apply] skipping success write-back for %s — result rekeyed to %s mid-phase", filePath, current.FileMatchInfo.MovieID)
+							return current, prov, nil
+						}
+						current.Movie = mergeApplyWritebackMovie(movie, result.Movie, current.Movie, afc.MovieResult, current, inputs.MovieRepo != nil)
+						// A successful explicit retry must clear the prior apply failure so
+						// later retries and reloads do not keep treating this row as failed.
+						if current.Status == models.JobStatusFailed {
+							current.Status = models.JobStatusCompleted
+							current.Error = ""
+						}
+						// codex r9 P2: clear the marker only when this retry fetched AND
+						// installed a poster after the download step's verification — Steps.
+						// Downloaded alone also fires on cover/trailer-only or dedup-skipped
+						// runs, which would unsafely clear a recrop refusal that nothing
+						// discharged. Skip-download, dry-run, no-poster-URL, and
+						// overwrite-refused retries all leave PosterVerified=false, so the
+						// stale-geometry gate still fires for a later poster-capable retry.
+						// codex r10 P1: legacy preview-only crops leave nil bounds. A fresh
+						// install against nil bounds ran NO fingerprint verification, so a
+						// marker gated only on PosterVerified would let a stale recrop
+						// block evaporate without ever discharging. Require non-nil bounds.
+						hasCropToDischarge := current.Movie != nil && current.Movie.Poster.PosterCropBounds != nil
+						if current.ErrorCode == downloader.PosterRecropRequiredCode && hasCropToDischarge && result != nil && result.Steps.PosterVerified {
+							current.ErrorCode = ""
+						}
+						return current, mergeWriteBackProvenance(inputs.Provenance[filePath], prov), nil
+					})
 				})
 				if err2 != nil {
 					logging.Warnf("Failed to update movie result for %s after apply: %v", filePath, err2)

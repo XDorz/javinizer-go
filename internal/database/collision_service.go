@@ -62,9 +62,11 @@ func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution s
 	if credit.Actress != nil {
 		oldCanonicalName = credit.Actress.FullName()
 	}
-
 	switch resolution {
 	case models.CollisionResolutionKeepIdentity:
+		if collision.Field == models.CreditFieldIdentityLink && credit.Actress != nil && !credit.Actress.Verified {
+			return 0, fmt.Errorf("resolve collision: keep_identity requires a verified identity")
+		}
 		if collision.Field != models.CreditFieldIdentityLink {
 			if err := tx.Model(&models.MovieCredit{}).Where("id = ?", credit.ID).
 				Update("display_force_canonical", true).Error; err != nil {
@@ -93,8 +95,11 @@ func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution s
 				return 0, wrapDBErr("adopt canonical", fmt.Sprintf("actress %d", credit.ActressID), err)
 			}
 		case models.CreditFieldReportedThumb:
-			if err := tx.Model(&models.Actress{}).Where("id = ?", credit.ActressID).
-				Update("thumb_url", collision.ReportedValue).Error; err != nil {
+			if err := tx.Model(&models.Actress{}).Where("id = ?", credit.ActressID).Updates(map[string]interface{}{
+				colThumbURL:  collision.ReportedValue,
+				colOrigin:    ActressOriginUser,
+				colUpdatedAt: time.Now().UTC(),
+			}).Error; err != nil {
 				return 0, wrapDBErr("adopt canonical", fmt.Sprintf("actress %d", credit.ActressID), err)
 			}
 		case models.CreditFieldCreditedName:
@@ -158,11 +163,13 @@ func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution s
 		if err := restoreActressProjectionTx(tx, credit.ActressID); err != nil {
 			return 0, err
 		}
-	} else if err := tx.Exec(
-		"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id = ?",
-		collision.MovieContentID,
-	).Error; err != nil {
-		return 0, wrapDBErr("mark dirty", fmt.Sprintf("movie %s", collision.MovieContentID), err)
+	} else if resolution != models.CollisionResolutionReassign {
+		if err := tx.Exec(
+			"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id = ?",
+			collision.MovieContentID,
+		).Error; err != nil {
+			return 0, wrapDBErr("mark dirty", fmt.Sprintf("movie %s", collision.MovieContentID), err)
+		}
 	}
 
 	var remainingCount int64
@@ -232,6 +239,13 @@ func (s *CollisionService) SetCreditSuppressed(ctx context.Context, creditID uin
 }
 
 func setCreditSuppressedTx(tx *gorm.DB, creditID uint, suppressed bool) error {
+	var credit models.MovieCredit
+	if err := tx.Preload("Actress").Where("id = ?", creditID).First(&credit).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("update suppressed: movie credit %d: %w", creditID, ErrNotFound)
+		}
+		return wrapDBErr("find", fmt.Sprintf("movie credit %d", creditID), err)
+	}
 	updates := map[string]interface{}{
 		colSuppressed: suppressed,
 		colOrigin:     string(models.CreditOriginUser),
@@ -244,47 +258,151 @@ func setCreditSuppressedTx(tx *gorm.DB, creditID uint, suppressed bool) error {
 	if res.RowsAffected == 0 {
 		return fmt.Errorf("update suppressed: movie credit %d: %w", creditID, ErrNotFound)
 	}
-	collisionUpdates := map[string]interface{}{
-		colStatus:     models.CollisionStatusResolved,
-		colResolution: models.CollisionResolutionBySuppression,
-		colUpdatedAt:  time.Now().UTC(),
-	}
-	collisionQuery := tx.Model(&models.CreditCollision{}).
-		Where("credit_id = ? AND status = ?", creditID, models.CollisionStatusOpen)
-	if !suppressed {
-		collisionUpdates = map[string]interface{}{
-			colStatus:     models.CollisionStatusOpen,
-			colResolution: "",
-			"user_pinned": true,
-			colUpdatedAt:  time.Now().UTC(),
-		}
-		collisionQuery = tx.Model(&models.CreditCollision{}).
-			Where("credit_id = ? AND status = ? AND resolution = ?", creditID, models.CollisionStatusResolved, models.CollisionResolutionBySuppression)
-	}
-	if err := collisionQuery.Updates(collisionUpdates).Error; err != nil {
-		return err
-	}
-	var credit models.MovieCredit
-	if err := tx.Model(&models.MovieCredit{}).Select("movie_content_id", "actress_id").Where("id = ?", creditID).First(&credit).Error; err != nil {
-		return err
-	}
 	if suppressed {
+		if err := tx.Model(&models.CreditCollision{}).
+			Where("credit_id = ? AND status = ?", creditID, models.CollisionStatusOpen).
+			Updates(map[string]interface{}{
+				colStatus:     models.CollisionStatusResolved,
+				colResolution: models.CollisionResolutionBySuppression,
+				colUpdatedAt:  time.Now().UTC(),
+			}).Error; err != nil {
+			return err
+		}
 		if err := tx.Exec(
 			"DELETE FROM movie_actresses WHERE movie_content_id = ? AND actress_id = ?",
 			credit.MovieContentID, credit.ActressID,
 		).Error; err != nil {
 			return err
 		}
-	} else if err := tx.Exec(
-		"INSERT OR IGNORE INTO movie_actresses (movie_content_id, actress_id) VALUES (?, ?)",
-		credit.MovieContentID, credit.ActressID,
-	).Error; err != nil {
+	} else if credit.Suppressed {
+		if err := restoreSuppressedCreditCollisionsTx(tx, &credit); err != nil {
+			return err
+		}
+		if err := tx.Exec(`
+		INSERT OR IGNORE INTO movie_actresses (movie_content_id, actress_id)
+		SELECT ?, ?
+		WHERE EXISTS (
+			SELECT 1 FROM actresses WHERE id = ? AND verified = ?
+		)
+	`, credit.MovieContentID, credit.ActressID, credit.ActressID, true).Error; err != nil {
+			return err
+		}
+	} else if err := tx.Exec(`
+		INSERT OR IGNORE INTO movie_actresses (movie_content_id, actress_id)
+		SELECT ?, ?
+		WHERE EXISTS (
+			SELECT 1 FROM actresses WHERE id = ? AND verified = ?
+		)
+	`, credit.MovieContentID, credit.ActressID, credit.ActressID, true).Error; err != nil {
 		return err
 	}
 	return tx.Exec(
 		"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id = ?",
 		credit.MovieContentID,
 	).Error
+}
+
+func restoreSuppressedCreditCollisionsTx(tx *gorm.DB, credit *models.MovieCredit) error {
+	if credit == nil || credit.Actress == nil {
+		return fmt.Errorf("restore suppressed collisions: credit identity is missing")
+	}
+	type evidence struct {
+		reported  string
+		canonical string
+	}
+	active := make(map[string]evidence, 3)
+	actress := credit.Actress
+	if !credit.LegacyInferred {
+		if !actress.Verified {
+			reported := strings.TrimSpace(credit.CreditedName)
+			if reported == "" {
+				reported = strings.TrimSpace(credit.CreditedJapaneseName)
+			}
+			if reported != "" {
+				active[models.CreditFieldIdentityLink] = evidence{reported: reported, canonical: canonicalActressName(actress)}
+			}
+		} else {
+			reportedName := strings.TrimSpace(credit.CreditedName)
+			if reportedName == "" {
+				reportedName = strings.TrimSpace(credit.CreditedJapaneseName)
+			}
+			canonicalName := canonicalActressName(actress)
+			if reportedName != "" && canonicalName != "" {
+				nameMatches := models.NormalizeActressNameKey(reportedName) == models.NormalizeActressNameKey(canonicalName) ||
+					models.NormalizeActressNameKey(reportedName) == models.NormalizeActressNameKey(actress.JapaneseName)
+				if !nameMatches {
+					aliasMatches, err := aliasMatchesCanonicalTx(tx, reportedName, actress)
+					if err != nil {
+						return err
+					}
+					nameMatches = aliasMatches
+				}
+				if !nameMatches {
+					active[models.CreditFieldCreditedName] = evidence{reported: reportedName, canonical: canonicalName}
+				}
+			}
+			reportedThumb := strings.TrimSpace(credit.ReportedThumbURL)
+			if reportedThumb != "" && strings.TrimSpace(actress.ThumbURL) != "" && reportedThumb != actress.ThumbURL {
+				active[models.CreditFieldReportedThumb] = evidence{reported: reportedThumb, canonical: actress.ThumbURL}
+			}
+		}
+	}
+
+	var previous []models.CreditCollision
+	if err := tx.Where("credit_id = ? AND status = ? AND resolution = ?", credit.ID, models.CollisionStatusResolved, models.CollisionResolutionBySuppression).Find(&previous).Error; err != nil {
+		return wrapDBErr("list", fmt.Sprintf("suppressed collisions for credit %d", credit.ID), err)
+	}
+	if !credit.LegacyInferred && !actress.Verified {
+		hasIdentityCollision := false
+		for i := range previous {
+			if previous[i].Field == models.CreditFieldIdentityLink {
+				hasIdentityCollision = true
+				break
+			}
+		}
+		if !hasIdentityCollision {
+			delete(active, models.CreditFieldIdentityLink)
+		}
+	}
+	restored := make(map[string]bool, len(previous))
+	for i := range previous {
+		collision := &previous[i]
+		current, ok := active[collision.Field]
+		updates := map[string]interface{}{
+			"canonical_value": collision.CanonicalValue,
+			colUpdatedAt:      time.Now().UTC(),
+		}
+		if ok && collision.ReportedValue == current.reported {
+			updates["canonical_value"] = current.canonical
+			updates[colStatus] = models.CollisionStatusOpen
+			updates[colResolution] = ""
+			restored[collision.Field+"\x00"+collision.ReportedValue] = true
+		} else {
+			updates[colStatus] = models.CollisionStatusResolved
+			updates[colResolution] = models.CollisionResolutionByRemoval
+		}
+		if err := tx.Model(&models.CreditCollision{}).Where("id = ?", collision.ID).Updates(updates).Error; err != nil {
+			return wrapDBErr("restore", fmt.Sprintf("collision %d", collision.ID), err)
+		}
+	}
+	var collisionRepo CreditCollisionRepository
+	for field, current := range active {
+		key := field + "\x00" + current.reported
+		if restored[key] {
+			continue
+		}
+		collision := &models.CreditCollision{
+			CreditID:       credit.ID,
+			MovieContentID: credit.MovieContentID,
+			Field:          field,
+			ReportedValue:  current.reported,
+			CanonicalValue: current.canonical,
+		}
+		if err := collisionRepo.RecordTx(tx, collision, credit.Source); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func reconcileActressCollisionsTx(tx *gorm.DB, actressID uint) error {
@@ -296,7 +414,7 @@ func reconcileActressCollisionsTx(tx *gorm.DB, actressID uint) error {
 	var collisions []models.CreditCollision
 	if err := tx.Model(&models.CreditCollision{}).
 		Joins("JOIN movie_credits ON movie_credits.id = credit_collisions.credit_id").
-		Where("movie_credits.actress_id = ? AND credit_collisions.status = ? AND credit_collisions.field IN ?", actressID, models.CollisionStatusOpen, []string{
+		Where("movie_credits.actress_id = ? AND credit_collisions.field IN ?", actressID, []string{
 			models.CreditFieldCreditedName,
 			models.CreditFieldReportedThumb,
 			models.CreditFieldIdentityLink,
@@ -322,7 +440,7 @@ func reconcileActressCollisionsTx(tx *gorm.DB, actressID uint) error {
 			"canonical_value": canonicalValue,
 			colUpdatedAt:      time.Now().UTC(),
 		}
-		if !collision.UserPinned && matches {
+		if collision.Status == models.CollisionStatusOpen && !collision.UserPinned && matches {
 			updates[colStatus] = models.CollisionStatusResolved
 			updates[colResolution] = models.CollisionResolutionAdoptCanonical
 		}
@@ -396,13 +514,17 @@ func upsertAliasTx(tx *gorm.DB, alias *models.ActressAlias) error {
 	return nil
 }
 
-func reassignLegacyActressTx(tx *gorm.DB, movieContentID string, sourceActressID, targetActressID uint) error {
-	if err := tx.Exec(`
-		INSERT OR IGNORE INTO movie_actresses (movie_content_id, actress_id)
-		SELECT ?, ?
-		WHERE EXISTS (
-			SELECT 1 FROM movie_actresses WHERE movie_content_id = ? AND actress_id = ?
-		)`, movieContentID, targetActressID, movieContentID, sourceActressID).Error; err != nil {
+func reassignLegacyActressTx(tx *gorm.DB, movieContentID string, sourceActressID, targetActressID uint, suppressed bool) error {
+	if suppressed {
+		return tx.Exec(
+			"DELETE FROM movie_actresses WHERE movie_content_id = ? AND actress_id IN (?, ?)",
+			movieContentID, sourceActressID, targetActressID,
+		).Error
+	}
+	if err := tx.Exec(
+		"INSERT OR IGNORE INTO movie_actresses (movie_content_id, actress_id) VALUES (?, ?)",
+		movieContentID, targetActressID,
+	).Error; err != nil {
 		return err
 	}
 	return tx.Exec(
@@ -427,6 +549,7 @@ func reassignCreditTx(tx *gorm.DB, credit *models.MovieCredit, targetActressID u
 		Where("movie_content_id = ? AND actress_id = ?", credit.MovieContentID, targetActressID).
 		First(&targetCredit).Error
 	if err == nil {
+		survivingSuppressed := targetCredit.Suppressed || credit.Suppressed
 		updates := map[string]interface{}{colUpdatedAt: time.Now().UTC()}
 		if credit.UserOverride && !targetCredit.UserOverride {
 			updates["override_name"] = credit.OverrideName
@@ -456,15 +579,30 @@ func reassignCreditTx(tx *gorm.DB, credit *models.MovieCredit, targetActressID u
 		if err := tx.Where("id = ?", credit.ID).Delete(&models.MovieCredit{}).Error; err != nil {
 			return err
 		}
-		return reassignLegacyActressTx(tx, credit.MovieContentID, credit.ActressID, targetActressID)
+		if err := reassignLegacyActressTx(tx, credit.MovieContentID, credit.ActressID, targetActressID, survivingSuppressed); err != nil {
+			return err
+		}
+	} else {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if err := tx.Model(&models.MovieCredit{}).Where("id = ?", credit.ID).Update("actress_id", targetActressID).Error; err != nil {
+			return err
+		}
+		if err := reassignLegacyActressTx(tx, credit.MovieContentID, credit.ActressID, targetActressID, credit.Suppressed); err != nil {
+			return err
+		}
 	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
+	if err := reconcileActressCollisionsTx(tx, targetActressID); err != nil {
 		return err
 	}
-	if err := tx.Model(&models.MovieCredit{}).Where("id = ?", credit.ID).Update("actress_id", targetActressID).Error; err != nil {
-		return err
+	if err := tx.Exec(
+		"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id = ?",
+		credit.MovieContentID,
+	).Error; err != nil {
+		return wrapDBErr("mark dirty", fmt.Sprintf("movie %s", credit.MovieContentID), err)
 	}
-	return reassignLegacyActressTx(tx, credit.MovieContentID, credit.ActressID, targetActressID)
+	return nil
 }
 
 func transferCollisionsTx(tx *gorm.DB, fromCreditID, toCreditID uint) error {
@@ -492,6 +630,7 @@ func transferCollisionsTx(tx *gorm.DB, fromCreditID, toCreditID uint) error {
 			}
 			if sc.Status == models.CollisionStatusOpen || targetCollision.Status == models.CollisionStatusOpen {
 				merged["status"] = models.CollisionStatusOpen
+				merged["resolution"] = ""
 			}
 			if err := tx.Model(&models.CreditCollision{}).Where("id = ?", targetCollision.ID).Updates(merged).Error; err != nil {
 				return err
