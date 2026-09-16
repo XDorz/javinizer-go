@@ -229,6 +229,14 @@ func createCandidateTx(tx *gorm.DB, scraped *models.Actress, nameKey string) (*m
 	return &candidate, nil
 }
 
+func quarantinePositiveDMMNameMatchTx(tx *gorm.DB, scraped *models.Actress) (*models.Actress, ResolutionOutcome, error) {
+	candidate, err := resolveAmbiguousCandidateTx(tx, scraped, actressNameKey(scraped))
+	if err != nil {
+		return nil, ResolutionAmbiguous, err
+	}
+	return candidate, ResolutionAmbiguous, nil
+}
+
 // ResolveActressIdentityTx resolves a scraped actress against existing
 // identities, linking to a verified match or a quarantined candidate.
 func ResolveActressIdentityTx(tx *gorm.DB, scraped *models.Actress) (*models.Actress, ResolutionOutcome, error) {
@@ -260,6 +268,9 @@ func ResolveActressIdentityTx(tx *gorm.DB, scraped *models.Actress) (*models.Act
 		aliasMatches = filterDMMlessActresses(aliasMatches)
 	}
 	if len(aliasMatches) == 1 {
+		if scraped.DMMID > 0 {
+			return quarantinePositiveDMMNameMatchTx(tx, scraped)
+		}
 		return &aliasMatches[0], ResolutionMatched, nil
 	}
 	if len(aliasMatches) > 1 {
@@ -279,6 +290,9 @@ func ResolveActressIdentityTx(tx *gorm.DB, scraped *models.Actress) (*models.Act
 		verifiedMatches = filterDMMlessActresses(verifiedMatches)
 	}
 	if len(verifiedMatches) == 1 {
+		if scraped.DMMID > 0 {
+			return quarantinePositiveDMMNameMatchTx(tx, scraped)
+		}
 		return &verifiedMatches[0], ResolutionMatched, nil
 	}
 

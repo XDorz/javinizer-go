@@ -325,6 +325,36 @@ func refreshApplyMovieIdentity(ctx context.Context, repo database.MovieRepositor
 	return known
 }
 
+// markCollisionGateFailure publishes a collision gate block through the ordinary per-file failure lane.
+func markCollisionGateFailure(inputs applyPhaseInputs, cfg ApplyPhaseConfig, filePath string, fileResult *resultstore.MovieResult, reason string) {
+	now := time.Now()
+	err := inputs.Updater.AtomicUpdateFileResult(filePath, func(current *resultstore.MovieResult) (*resultstore.MovieResult, error) {
+		current.Status = models.JobStatusFailed
+		current.Error = reason
+		current.ErrorCode = string(models.ScraperErrorKindBlocked)
+		current.EndedAt = &now
+		return current, nil
+	})
+	if err != nil {
+		inputs.Updater.UpdateFileResult(filePath, &resultstore.MovieResult{
+			FileMatchInfo: fileResult.FileMatchInfo,
+			Movie:         fileResult.Movie,
+			Status:        models.JobStatusFailed,
+			Error:         reason,
+			ErrorCode:     string(models.ScraperErrorKindBlocked),
+			StartedAt:     fileResult.StartedAt,
+			EndedAt:       &now,
+		})
+	}
+	inputs.Broadcaster.Send(JobEvent{
+		JobID: inputs.JobID, MovieID: fileResult.Movie.ID, Phase: jobEventPhaseApply,
+		Step: StepFailed, Message: reason, Timestamp: now,
+	})
+	if cfg.OnFileFailed != nil {
+		cfg.OnFileFailed(filePath, reason)
+	}
+}
+
 // Run executes the apply phase: setup errgroup → iterate files → dispatch
 // applyFile → collect outcomes → track results → report status.
 func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg ApplyPhaseConfig) {
@@ -361,6 +391,7 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 		retryPaths[filePath] = struct{}{}
 	}
 	blockedCollisions := map[string]bool{}
+	blockedReasons := map[string]string{}
 	if inputs.CollisionRepo != nil {
 		movieIDs := make([]string, 0, len(inputs.Results))
 		seen := make(map[string]bool, len(inputs.Results))
@@ -378,6 +409,7 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 				if fileResult.Movie != nil && fileResult.Movie.ContentID != "" {
 					logging.Infof("[Apply] Collision gate unavailable: skipping %s (movie %s)", filePath, fileResult.Movie.ContentID)
 					blockedCollisions[fileResult.Movie.ContentID] = true
+					blockedReasons[fileResult.Movie.ContentID] = "apply blocked because credit collision status is unavailable"
 				}
 				_ = filePath
 			}
@@ -385,6 +417,7 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 			for id, count := range counts {
 				if count > 0 {
 					blockedCollisions[id] = true
+					blockedReasons[id] = "apply blocked by an open credit collision"
 				}
 			}
 		}
@@ -414,6 +447,7 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 			continue
 		}
 		if blockedCollisions[fileResult.Movie.ContentID] {
+			markCollisionGateFailure(inputs, cfg, filePath, fileResult, blockedReasons[fileResult.Movie.ContentID])
 			collisionGateFailures[filePath] = struct{}{}
 			continue
 		}

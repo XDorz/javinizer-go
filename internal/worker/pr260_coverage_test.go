@@ -3,9 +3,11 @@ package worker
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/mocks"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/scrape"
@@ -199,4 +201,78 @@ func TestApplyPhaseRefreshesPersistedCreditsPR260(t *testing.T) {
 	assert.Equal(t, canonical.ID, cmd.Movie.Actresses[0].ID)
 	assert.Equal(t, canonical.ID, cmd.Movie.Credits[0].ActressID)
 	assert.Equal(t, "Canonical Actress", cmd.Movie.Credits[0].CreditedName)
+}
+
+func TestApplyPhaseCollisionGatePublishesPerFileFailurePR260(t *testing.T) {
+	repo := mocks.NewMockCreditCollisionRepositoryInterface(t)
+	repo.EXPECT().CountOpenByMovieBatch(mock.Anything, mock.Anything).Return(map[string]int64{"blocked": 1, "clear": 0}, nil)
+	wf := &stubApplyWorkflow{applyResult: &workflow.ApplyResult{Movie: &models.Movie{ID: "clear", ContentID: "clear"}}}
+	inputs := makeApplyInputs(wf)
+	inputs.CollisionRepo = repo
+	blocked := &resultstore.MovieResult{Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "blocked", ContentID: "blocked"}}
+	clear := &resultstore.MovieResult{Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "clear", ContentID: "clear"}}
+	inputs.Results = map[string]*resultstore.MovieResult{"blocked.mp4": blocked, "clear.mp4": clear}
+	inputs.Updater.UpdateFileResult("blocked.mp4", blocked)
+	inputs.Updater.UpdateFileResult("clear.mp4", clear)
+
+	var organized, failed int
+	var failedPath, failedReason string
+	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
+		Destination:     "/output",
+		OnPhaseComplete: func(org, fail int) { organized, failed = org, fail },
+		OnFileFailed:    func(path, reason string) { failedPath, failedReason = path, reason },
+	})
+
+	row := inputs.Updater.(*stubUpdater).getResult("blocked.mp4")
+	require.NotNil(t, row)
+	assert.Equal(t, models.JobStatusFailed, row.Status)
+	assert.Equal(t, string(models.ScraperErrorKindBlocked), row.ErrorCode)
+	assert.Contains(t, row.Error, "open credit collision")
+	assert.Equal(t, 1, organized)
+	assert.Equal(t, 1, failed)
+	assert.True(t, inputs.Lifecycle.(*stubLifecycle).completed)
+	assert.False(t, inputs.Lifecycle.(*stubLifecycle).organized)
+	assert.Equal(t, 1, wf.getApplyCalled())
+	assert.Equal(t, "blocked.mp4", failedPath)
+	assert.Contains(t, failedReason, "open credit collision")
+	broadcaster := inputs.Broadcaster.(*stubBroadcaster)
+	assert.Condition(t, func() bool {
+		for _, event := range broadcaster.events {
+			if event.Step == StepFailed && event.MovieID == "blocked" && strings.Contains(event.Message, "open credit collision") {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func TestApplyPhaseRealCollisionResolutionRetriesOnlyBlockedFilePR260(t *testing.T) {
+	db := newActressEditTestDB(t)
+	ctx := context.Background()
+	actress := models.Actress{FirstName: "Gate", Verified: true}
+	require.NoError(t, db.Create(&actress).Error)
+	movie := models.Movie{ContentID: "blocked", ID: "blocked"}
+	require.NoError(t, db.Create(&movie).Error)
+	credit := models.MovieCredit{MovieContentID: movie.ContentID, ActressID: actress.ID, CreditedName: "Gate"}
+	require.NoError(t, db.Create(&credit).Error)
+	collision := models.CreditCollision{CreditID: credit.ID, MovieContentID: movie.ContentID, Field: models.CreditFieldCreditedName, ReportedValue: "Reported", CanonicalValue: "Gate", Status: models.CollisionStatusOpen}
+	require.NoError(t, db.Create(&collision).Error)
+
+	wf := &stubApplyWorkflow{applyResult: &workflow.ApplyResult{Movie: &models.Movie{ID: "applied"}}}
+	inputs := makeApplyInputs(wf)
+	inputs.CollisionRepo = database.NewCreditCollisionRepository(db)
+	blocked := &resultstore.MovieResult{Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "blocked", ContentID: "blocked"}}
+	clear := &resultstore.MovieResult{Status: models.JobStatusCompleted, Movie: &models.Movie{ID: "clear", ContentID: "clear"}}
+	inputs.Results = map[string]*resultstore.MovieResult{"blocked.mp4": blocked, "clear.mp4": clear}
+	inputs.Updater.UpdateFileResult("blocked.mp4", blocked)
+	inputs.Updater.UpdateFileResult("clear.mp4", clear)
+
+	NewApplyPhase().Run(ctx, inputs, ApplyPhaseConfig{Destination: "/output"})
+	require.Equal(t, 1, wf.getApplyCalled())
+	require.Equal(t, models.JobStatusFailed, inputs.Updater.(*stubUpdater).getResult("blocked.mp4").Status)
+
+	require.NoError(t, inputs.CollisionRepo.Resolve(ctx, collision.ID, models.CollisionResolutionKeepIdentity))
+	NewApplyPhase().Run(ctx, inputs, ApplyPhaseConfig{Destination: "/output", RetryFilePaths: []string{"blocked.mp4"}})
+	require.Equal(t, 2, wf.getApplyCalled(), "the already-clear file must not run twice")
+	require.Equal(t, models.JobStatusCompleted, inputs.Updater.(*stubUpdater).getResult("blocked.mp4").Status)
 }

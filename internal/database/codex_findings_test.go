@@ -101,7 +101,7 @@ func TestResolveActressIdentityHonorsDMMIDDuringNameFallback(t *testing.T) {
 		require.False(t, found.Verified)
 	})
 
-	t.Run("dmm-less identity remains eligible", func(t *testing.T) {
+	t.Run("dmm-less identity is quarantined for positive dmm", func(t *testing.T) {
 		db := newCreditTestDB(t)
 		withDMM := models.Actress{DMMID: 1003, FirstName: "Same", LastName: "Name", Verified: true, Origin: ActressOriginUser}
 		withoutDMM := models.Actress{DMMID: 0, FirstName: "Same", LastName: "Name", Verified: true, Origin: ActressOriginUser}
@@ -110,9 +110,11 @@ func TestResolveActressIdentityHonorsDMMIDDuringNameFallback(t *testing.T) {
 
 		found, outcome, err := ResolveActressIdentityTx(db.DB, &models.Actress{DMMID: 1004, FirstName: "Same", LastName: "Name"})
 		require.NoError(t, err)
-		require.Equal(t, ResolutionMatched, outcome)
+		require.Equal(t, ResolutionAmbiguous, outcome)
 		require.NotNil(t, found)
-		require.Equal(t, withoutDMM.ID, found.ID)
+		require.NotEqual(t, withoutDMM.ID, found.ID)
+		require.Equal(t, 1004, found.DMMID)
+		require.False(t, found.Verified)
 	})
 
 	t.Run("conflicting dmm identity is not linked by alias", func(t *testing.T) {

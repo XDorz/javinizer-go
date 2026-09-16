@@ -380,17 +380,15 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 			}
 		}
 
-		// Load source to check whether DMMID swap is needed
-		source, err := m.repo.FindByID(ctx, sourceID)
-		if err != nil {
-			return err
+		var source, previousTarget models.Actress
+		if err := tx.First(&source, sourceID).Error; err != nil {
+			return wrapDBErr("load", fmt.Sprintf("merge source actress %d", sourceID), err)
+		}
+		if err := tx.First(&previousTarget, targetID).Error; err != nil {
+			return wrapDBErr("load", fmt.Sprintf("merge target actress %d", targetID), err)
 		}
 		if merged.DMMID > 0 && merged.DMMID == source.DMMID {
-			target, err := m.repo.FindByID(ctx, targetID)
-			if err != nil {
-				return err
-			}
-			if target.DMMID != source.DMMID {
+			if previousTarget.DMMID != source.DMMID {
 				tempDMMID := -int(sourceID)
 				if tempDMMID == 0 {
 					tempDMMID = -1
@@ -415,7 +413,10 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 			}
 			return wrapDBErr("update", fmt.Sprintf("merge actress %d", targetID), err)
 		}
-		if err := transitionActressCanonicalNamesTx(tx, targetID, source); err != nil {
+		if err := transitionActressCanonicalNamesTx(tx, targetID, &previousTarget); err != nil {
+			return wrapDBErr("merge", fmt.Sprintf("stored aliases from actress %d", targetID), err)
+		}
+		if err := transitionActressCanonicalNamesTx(tx, targetID, &source); err != nil {
 			return wrapDBErr("merge", fmt.Sprintf("stored aliases from actress %d", sourceID), err)
 		}
 

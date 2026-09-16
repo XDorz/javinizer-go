@@ -2,11 +2,9 @@ import { test, expect, type APIRequestContext } from '@playwright/test';
 import {
 	BACKEND_BASE,
 	DEFAULT_INPUT_DIR,
-	DEFAULT_OUTPUT_DIR,
 	loginAgainstRealBackend,
 	navigateToReviewPage,
 	seedInputFiles,
-	submitOrganize,
 	submitScrape,
 	waitForJobCompletion,
 	soleResult,
@@ -143,11 +141,7 @@ test('PR260 browser resolve then save and reload preserves canonical cast', asyn
 		timeoutMs: 120_000,
 	});
 	const initialRevision = (soleResult(collisionJobBody).result as { revision?: number }).revision;
-	await submitOrganize(request, collisionJob, `${DEFAULT_OUTPUT_DIR}/pr260-collision-${runTag}`);
-	const collisionJobAfterOrganize = await waitForJobCompletion(request, collisionJob, {
-		timeoutMs: 120_000,
-	});
-	const collisionResult = soleResult(collisionJobAfterOrganize).result;
+	const collisionResult = soleResult(collisionJobBody).result;
 	expect(collisionResult.movie_id).toBe(targetID);
 
 	let collisionList: { collisions: Array<Record<string, unknown>> } = { collisions: [] };
