@@ -184,6 +184,17 @@ func TestMovieRepository_FindByContentID(t *testing.T) {
 		_, err := repo.FindByContentID(context.TODO(), "nonexistent-content-id")
 		assert.Error(t, err)
 	})
+
+	t.Run("credit hydration failure", func(t *testing.T) {
+		movie := createTestMovie("IPX-031")
+		movie.ContentID = "credit-query-failure"
+		require.NoError(t, repo.Create(context.TODO(), movie))
+		require.NoError(t, db.Exec("DROP TABLE movie_credits").Error)
+
+		found, err := repo.FindByContentID(context.TODO(), movie.ContentID)
+		require.ErrorContains(t, err, "list credits for movie credit-query-failure")
+		require.Nil(t, found)
+	})
 }
 
 func TestMovieRepository_Delete(t *testing.T) {

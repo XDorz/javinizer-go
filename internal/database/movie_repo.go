@@ -254,6 +254,11 @@ func (r *MovieRepository) FindByContentID(ctx context.Context, contentID string)
 		}
 		return nil, wrapDBErr("find", fmt.Sprintf("movie %s", contentID), err)
 	}
+	credits, err := NewMovieCreditRepository(r.GetDB()).ListByMovie(ctx, movie.ContentID)
+	if err != nil {
+		return nil, err
+	}
+	movie.Credits = credits
 	return &movie, nil
 }
 

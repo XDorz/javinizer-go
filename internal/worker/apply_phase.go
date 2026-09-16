@@ -291,20 +291,21 @@ func refreshApplyMovieIdentity(ctx context.Context, repo database.MovieRepositor
 			continue
 		}
 		contentID := strings.TrimSpace(fileResult.Movie.ContentID)
-		movieID := strings.TrimSpace(fileResult.Movie.ID)
-		if contentID == "" || movieID == "" {
+		if contentID == "" {
 			continue
 		}
+		known[contentID] = known[contentID] || fileResult.PersistedMovie
 		if _, ok := persistedByContentID[contentID]; ok {
 			continue
 		}
-		persisted, err := repo.FindByID(ctx, movieID)
+		persisted, err := repo.FindByContentID(ctx, contentID)
 		if err != nil {
-			logging.Warnf("[Apply] failed to refresh persisted movie %s: %v", movieID, err)
+			logging.Warnf("[Apply] failed to refresh persisted movie %s: %v", contentID, err)
 			continue
 		}
 		if persisted != nil {
 			persistedByContentID[contentID] = persisted
+			known[contentID] = true
 		}
 	}
 	for _, fileResult := range results {
@@ -850,15 +851,18 @@ func interpretApplyResult(
 		} else if !writebackPreSkipped(inputs.Updater, movie, filePath, "Apply") {
 			// R10-6: state+provenance publish under ONE acquisition — a persist
 			// snapshot between the two never observes mismatched halves.
-			errUp := withApplyPublicationFence(taskCtx, inputs, movie, afc, func() error {
+			publicationStale := errors.Is(applyErr, database.ErrApplyPublicationStale)
+			updateFailure := func() error {
 				return inputs.Updater.AtomicUpdateFileResultWithProvenance(filePath, func(current *resultstore.MovieResult, prov *resultstore.ProvenanceData) (*resultstore.MovieResult, *resultstore.ProvenanceData, error) {
 					if applyWritebackIdentityMismatch(movie, current) {
 						logging.Warnf("[Apply] skipping write-back for %s — result rekeyed to %s mid-phase", filePath, current.FileMatchInfo.MovieID)
 						return current, prov, nil
 					}
 					fm := applyMatchFollowedByLiveIdentity(afc.Match, current)
-					current.FileMatchInfo = fm
-					current.Movie = mergeApplyWritebackMovie(movie, movie, current.Movie, afc.MovieResult, current, inputs.MovieRepo != nil)
+					if !publicationStale {
+						current.FileMatchInfo = fm
+						current.Movie = mergeApplyWritebackMovie(movie, movie, current.Movie, afc.MovieResult, current, inputs.MovieRepo != nil)
+					}
 					current.Status = fileStatus
 					current.Error = errMsg
 					if errorCode != "" && samePosterCropIntent(movie, current.Movie) &&
@@ -900,7 +904,13 @@ func interpretApplyResult(
 					current.EndedAt = &now
 					return current, mergeWriteBackProvenance(inputs.Provenance[filePath], prov), nil
 				})
-			})
+			}
+			var errUp error
+			if publicationStale {
+				errUp = updateFailure()
+			} else {
+				errUp = withApplyPublicationFence(taskCtx, inputs, movie, afc, updateFailure)
+			}
 			if errUp != nil && !errors.Is(errUp, errApplyPublicationFence) {
 				upsertWriteBackResultWithProvenance(inputs.Updater, filePath, &resultstore.MovieResult{
 					FileMatchInfo: afc.Match,

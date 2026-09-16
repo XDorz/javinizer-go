@@ -39,7 +39,7 @@ func TestPR260FiniteArtifactPublicationAuthorityAndFallback(t *testing.T) {
 	}{
 		{name: "nil authority", want: "authoritative movie changed", callbacks: 1},
 		{name: "generation changed", authoritative: &models.Movie{RenderGeneration: 9}, want: "authoritative movie changed", callbacks: 1},
-		{name: "stale rejection", fenceErr: database.ErrApplyPublicationStale, rejected: true},
+		{name: "stale rejection", fenceErr: database.ErrApplyPublicationStale, want: database.ErrApplyPublicationStale.Error(), rejected: true},
 		{name: "persisted missing", fenceErr: database.ErrNotFound, persisted: true, want: "record not found"},
 		{name: "legacy missing", fenceErr: database.ErrNotFound, publish: true},
 		{name: "matching authority", authoritative: &models.Movie{RenderGeneration: 3}, publish: true, callbacks: 1},

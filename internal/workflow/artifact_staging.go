@@ -359,7 +359,7 @@ func (s *artifactStage) publish(ctx context.Context, o *applyOrchImpl, state *ap
 	if errors.Is(returnErr, database.ErrApplyPublicationStale) {
 		s.rejected = true
 		s.reject(state)
-		return nil
+		return returnErr
 	}
 	return returnErr
 }

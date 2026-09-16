@@ -176,7 +176,7 @@ func TestApplyPhaseRefreshesPersistedCreditsPR260(t *testing.T) {
 		Actresses: []models.Actress{canonical},
 		Credits:   []models.MovieCredit{{ActressID: canonical.ID, Actress: &canonical, CreditedName: "Canonical Actress"}},
 	}
-	repo.EXPECT().FindByID(mock.Anything, "movie-db-id").Return(persisted, nil)
+	repo.EXPECT().FindByContentID(mock.Anything, "refresh-001").Return(persisted, nil)
 	wf := &stubApplyWorkflow{applyResult: &workflow.ApplyResult{Movie: &models.Movie{ID: "movie-db-id"}}}
 	inputs := makeApplyInputs(wf)
 	inputs.MovieRepo = repo

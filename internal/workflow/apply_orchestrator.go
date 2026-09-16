@@ -314,6 +314,7 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 				OperationID:    opID,
 				Steps:          steps,
 				FailedStep:     "artifact_publication",
+				PrePublication: true,
 			}, fmt.Errorf("artifact publication failed: %w", err)
 		}
 	}

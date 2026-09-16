@@ -169,16 +169,14 @@ func TestPR260RealArtifactInterleavingDoesNotPublishStaleOutputs(t *testing.T) {
 	}
 	release()
 	<-done
-	require.NoError(t, applyErr)
 	persisted, err := db.Repositories().MovieRepo.FindByID(context.Background(), movie.ID)
 	require.NoError(t, err)
 	require.True(t, persisted.RenderDirty)
 	publication := atomic.LoadInt32(&publicationOrder)
 	mutation := atomic.LoadInt32(&mutationOrder)
 	t.Logf("orders publication=%d mutation=%d oldDir=%s oldNFO=%s oldPoster=%s", publication, mutation, oldDir, oldNFO, oldPoster)
-	require.Positive(t, publication)
 	require.Positive(t, mutation)
-	if mutation < publication {
+	if errors.Is(applyErr, database.ErrApplyPublicationStale) {
 		exists, existsErr := afero.Exists(fs, oldNFO)
 		require.NoError(t, existsErr)
 		assert.False(t, exists)
@@ -188,6 +186,8 @@ func TestPR260RealArtifactInterleavingDoesNotPublishStaleOutputs(t *testing.T) {
 		_, statErr := fs.Stat(oldDir)
 		assert.Error(t, statErr)
 	} else {
+		require.NoError(t, applyErr)
+		require.Positive(t, publication)
 		require.Less(t, publication, mutation)
 	}
 	_ = source
@@ -313,4 +313,62 @@ func TestPR260ArtifactStagingHelpers(t *testing.T) {
 		_, err = fs.Stat(stageRoot)
 		assert.Error(t, err)
 	})
+}
+
+func TestPR260RealStaleArtifactOutcomeFailsWorkerFacingExecuteAndRetries(t *testing.T) {
+	db, _ := pr260ArtifactDB(t)
+	actress := models.Actress{FirstName: "Fence", LastName: "Retry", Verified: true, Origin: "user"}
+	require.NoError(t, db.Create(&actress).Error)
+	movie := models.Movie{ContentID: "pr260-stale-outcome", ID: "PR260-STALE-OUTCOME", Title: "Stale outcome", Actresses: []models.Actress{actress}, RenderDirty: true, RenderGeneration: 7}
+	require.NoError(t, db.Create(&movie).Error)
+	fs := afero.NewMemMapFs()
+	source := "/incoming/PR260-STALE-OUTCOME.mp4"
+	dest := "/library/Fence Retry"
+	require.NoError(t, fs.MkdirAll(filepath.Dir(source), 0o755))
+	require.NoError(t, fs.MkdirAll(dest, 0o755))
+	require.NoError(t, afero.WriteFile(fs, source, []byte("source"), 0o644))
+	orch := pr260RealApply(fs, &movie, organizer.MediaFormatConfig{}, nil, true)
+	orch.artifactPrepared = func() {
+		require.NoError(t, db.Model(&models.Movie{}).
+			Where("content_id = ?", movie.ContentID).
+			Updates(map[string]any{"render_generation": movie.RenderGeneration + 1, "render_dirty": true}).Error)
+	}
+	cmd := ApplyCmd{
+		Movie:            &movie,
+		PersistedMovie:   true,
+		PublicationFence: db.Repositories().MovieRepo.(database.ApplyPublicationFencer),
+		Match:            models.FileMatchInfo{Path: source, Name: filepath.Base(source), Extension: ".mp4", MovieID: movie.ID},
+		DestPath:         dest,
+		Organize:         OrganizeOptions{Skip: true},
+		GenerateNFO:      true,
+		OperationMode:    operationmode.OperationModeMetadataArtwork,
+	}
+	result, err := orch.Execute(context.Background(), cmd)
+	require.ErrorIs(t, err, database.ErrApplyPublicationStale)
+	require.NotNil(t, result)
+	require.Equal(t, "artifact_publication", result.FailedStep)
+	require.True(t, result.PrePublication)
+	require.Empty(t, result.NFOPath)
+	require.Empty(t, result.DownloadPaths)
+	exists, statErr := afero.Exists(fs, source)
+	require.NoError(t, statErr)
+	require.True(t, exists)
+	entries, readErr := afero.ReadDir(fs, filepath.Dir(dest))
+	require.NoError(t, readErr)
+	for _, entry := range entries {
+		require.NotContains(t, entry.Name(), ".javinizer-apply-")
+	}
+	persisted, findErr := db.Repositories().MovieRepo.FindByContentID(context.Background(), movie.ContentID)
+	require.NoError(t, findErr)
+	require.True(t, persisted.RenderDirty)
+
+	orch.artifactPrepared = nil
+	cmd.Movie = persisted
+	result, err = orch.Execute(context.Background(), cmd)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotEmpty(t, result.NFOPath)
+	persisted, findErr = db.Repositories().MovieRepo.FindByContentID(context.Background(), movie.ContentID)
+	require.NoError(t, findErr)
+	require.False(t, persisted.RenderDirty)
 }
