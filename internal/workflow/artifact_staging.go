@@ -593,33 +593,84 @@ func (s *artifactStage) installTree(skipFile, skipDir string, preserve []string,
 }
 
 func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir, finalArtifactDir string) (bool, error) {
+	type installPath struct {
+		source, target string
+		skip           bool
+		replace        bool
+	}
+	plans := make([]installPath, 0, len(paths))
 	preserved := false
+
+	// Preflight every deterministic path and type check before publication. The
+	// later filesystem operations can still fail because of I/O errors or races.
 	for _, source := range paths {
 		target, err := s.publicationPath(source, stagedArtifactDir, finalArtifactDir)
 		if err != nil {
 			return false, err
 		}
-		if !s.original.OverwriteExistingMedia && containsPath(preserve, source) {
-			if _, statErr := s.fs.Stat(target); statErr == nil {
+		sourceInfo, statErr := s.fs.Stat(source)
+		if statErr != nil {
+			return false, fmt.Errorf("inspect staged artifact %s: %w", source, statErr)
+		}
+		if !sourceInfo.Mode().IsRegular() {
+			return false, fmt.Errorf("staged artifact is not a regular file: %s", source)
+		}
+
+		plan := installPath{source: source, target: target}
+		if filepath.Clean(source) == filepath.Clean(target) {
+			plan.skip = true
+			if !s.original.OverwriteExistingMedia && containsPath(preserve, source) {
 				preserved = true
-				continue
 			}
+			plans = append(plans, plan)
+			continue
 		}
-		if err := s.fs.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return false, fmt.Errorf("create artifact destination: %w", err)
-		}
-		if info, statErr := s.fs.Stat(target); statErr == nil {
+		if info, targetErr := s.fs.Stat(target); targetErr == nil {
 			if info.IsDir() {
 				return false, fmt.Errorf("artifact destination is a directory: %s", target)
 			}
-			if removeErr := s.fs.Remove(target); removeErr != nil {
-				return false, fmt.Errorf("replace artifact destination %s: %w", target, removeErr)
+			if !s.original.OverwriteExistingMedia && containsPath(preserve, source) {
+				plan.skip = true
+				preserved = true
+			} else {
+				plan.replace = true
 			}
-		} else if !os.IsNotExist(statErr) {
-			return false, fmt.Errorf("inspect artifact destination %s: %w", target, statErr)
+		} else if !os.IsNotExist(targetErr) {
+			return false, fmt.Errorf("inspect artifact destination %s: %w", target, targetErr)
 		}
-		if err := s.fs.Rename(source, target); err != nil {
-			return false, fmt.Errorf("publish staged artifact %s: %w", target, err)
+		for parent := filepath.Dir(target); parent != "."; parent = filepath.Dir(parent) {
+			info, parentErr := s.fs.Stat(parent)
+			if parentErr == nil {
+				if !info.IsDir() {
+					return false, fmt.Errorf("artifact destination parent is not a directory: %s", parent)
+				}
+				break
+			}
+			if !os.IsNotExist(parentErr) {
+				return false, fmt.Errorf("inspect artifact destination parent %s: %w", parent, parentErr)
+			}
+			next := filepath.Dir(parent)
+			if next == parent {
+				break
+			}
+		}
+		plans = append(plans, plan)
+	}
+
+	for _, plan := range plans {
+		if plan.skip {
+			continue
+		}
+		if err := s.fs.MkdirAll(filepath.Dir(plan.target), 0o755); err != nil {
+			return false, fmt.Errorf("create artifact destination: %w", err)
+		}
+		if plan.replace {
+			if removeErr := s.fs.Remove(plan.target); removeErr != nil {
+				return false, fmt.Errorf("replace artifact destination %s: %w", plan.target, removeErr)
+			}
+		}
+		if err := s.fs.Rename(plan.source, plan.target); err != nil {
+			return false, fmt.Errorf("publish staged artifact %s: %w", plan.target, err)
 		}
 	}
 	return preserved, nil

@@ -224,7 +224,11 @@ func (g *Generator) resolveTagline(ctx context.Context, tmplCtx *template.Contex
 // <ACTORS>/<ACTRESSES> resolve identically to folder/file/display-title
 // templates.
 func (g *Generator) movieTemplateContext(applyCtx context.Context, movie *models.Movie, videoFilePath, partSuffix string, partNumber int, isMultiPart bool) *template.Context {
-	ctx := template.NewContextFromMovie(movie)
+	ctx := template.NewContextFromMovieWithOptions(movie, template.ContextOptions{
+		FirstNameOrder:  g.config.FirstNameOrder,
+		RenderCredits:   true,
+		UseCreditedName: g.config.UseCreditedName,
+	})
 	ctx.SetExecCtx(applyCtx)
 	ctx.VideoFilePath = videoFilePath
 	ctx.PartSuffix = partSuffix

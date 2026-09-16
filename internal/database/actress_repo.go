@@ -67,11 +67,29 @@ func (r *ActressRepository) RenameNameFields(ctx context.Context, id uint, first
 		colLastName:     lastName,
 		colJapaneseName: japaneseName,
 	}
-	if err := r.GetDB().WithContext(ctx).Model(&models.Actress{}).Where("id = ?", id).Updates(updates).Error; err != nil {
-		return wrapDBErr("rename", fmt.Sprintf("actress %d", id), err)
-	}
-	r.markCreditingMoviesDirty(ctx, id)
-	return nil
+	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current models.Actress
+		if err := tx.First(&current, id).Error; err != nil {
+			return wrapDBErr("rename", fmt.Sprintf("actress %d", id), err)
+		}
+		oldCanonicalName := canonicalActressName(&current)
+		if err := tx.Model(&models.Actress{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+			return wrapDBErr("rename", fmt.Sprintf("actress %d", id), err)
+		}
+		if err := retargetActressAliasesTx(tx, id, oldCanonicalName); err != nil {
+			return err
+		}
+		if err := reconcileActressCollisionsTx(tx, id); err != nil {
+			return err
+		}
+		if err := tx.Exec(
+			"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id IN (SELECT movie_content_id FROM movie_credits WHERE actress_id = ?)",
+			id,
+		).Error; err != nil {
+			return wrapDBErr("mark dirty", fmt.Sprintf("movies for actress %d", id), err)
+		}
+		return nil
+	})
 }
 
 // FindByID loads an actress by its primary key.
