@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -100,7 +101,14 @@ func TestPR260ArtifactSecondPhaseAuthority(t *testing.T) {
 func TestPR260ArtifactSecondPhaseCallbackAndCleanFailure(t *testing.T) {
 	for _, mode := range []string{"publisher-error", "clean-error", "context-canceled"} {
 		t.Run(mode, func(t *testing.T) {
-			db := setupBaseRepoTestDB(t)
+			db, err := New(&Config{
+				Type:     "sqlite",
+				DSN:      filepath.Join(t.TempDir(), "publication.db"),
+				LogLevel: "silent",
+			})
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, db.Close()) })
+			require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
 			seedArtifactPublicationMovie(t, db, "second-clean", 6, false)
 			if mode == "clean-error" {
 				require.NoError(t, db.Exec("CREATE TRIGGER pr260_clean_fault BEFORE UPDATE OF render_dirty ON movies WHEN NEW.render_dirty = 0 BEGIN SELECT RAISE(ABORT, 'second clean fault'); END").Error)
@@ -109,7 +117,7 @@ func TestPR260ArtifactSecondPhaseCallbackAndCleanFailure(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			called := 0
-			err := NewMovieRepository(db).WithApplyArtifactPublicationFence(ctx, "second-clean", 6, func(*models.Movie) error {
+			err = NewMovieRepository(db).WithApplyArtifactPublicationFence(ctx, "second-clean", 6, func(*models.Movie) error {
 				called++
 				if mode == "publisher-error" {
 					return errors.New("publisher fault")
