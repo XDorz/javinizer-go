@@ -317,10 +317,8 @@ func refreshApplyMovieIdentity(ctx context.Context, repo database.MovieRepositor
 			continue
 		}
 		refreshed := persisted.Clone()
-		fileResult.Movie.Actresses = refreshed.Actresses
-		fileResult.Movie.Credits = refreshed.Credits
-		fileResult.Movie.RenderGeneration = refreshed.RenderGeneration
-		known[strings.TrimSpace(fileResult.Movie.ContentID)] = true
+		fileResult.Movie = refreshed
+		known[strings.TrimSpace(refreshed.ContentID)] = true
 	}
 	return known
 }
@@ -373,6 +371,13 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 		}
 	}()
 
+	reviewBaselines := make(map[string]*models.Movie, len(inputs.Results))
+	for filePath, fileResult := range inputs.Results {
+		if fileResult != nil {
+			reviewBaselines[filePath] = fileResult.Movie.Clone()
+		}
+	}
+	inputs.ReviewBaselines = reviewBaselines
 	inputs.PersistedMovies = refreshApplyMovieIdentity(ctx, inputs.MovieRepo, inputs.Results)
 
 	excludedSnapshot := make(map[string]bool, len(inputs.Results))
@@ -403,6 +408,10 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 			movieIDs = append(movieIDs, fileResult.Movie.ContentID)
 		}
 		counts, err := inputs.CollisionRepo.CountOpenByMovieBatch(ctx, movieIDs)
+		if ctx.Err() != nil {
+			inputs.Lifecycle.MarkCancelled()
+			return
+		}
 		if err != nil {
 			logging.Errorf("[Apply] collision gate lookup failed; failing closed for this run: %v", err)
 			for filePath, fileResult := range inputs.Results {
@@ -782,6 +791,7 @@ func buildApplyCmd(
 		FilePath:              filePath,
 		Movie:                 movie,
 		MovieResult:           fileResult,
+		reviewBaseline:        inputs.ReviewBaselines[filePath],
 		PublicationGeneration: movie.RenderGeneration,
 		PersistedMovie:        applyCmd.PersistedMovie,
 		Match:                 match,
@@ -895,7 +905,7 @@ func interpretApplyResult(
 					fm := applyMatchFollowedByLiveIdentity(afc.Match, current)
 					if !publicationStale {
 						current.FileMatchInfo = fm
-						current.Movie = mergeApplyWritebackMovie(movie, movie, current.Movie, afc.MovieResult, current, inputs.MovieRepo != nil)
+						current.Movie = mergeApplyWritebackMovie(afc.reviewBaseline, movie, movie, current.Movie, afc.MovieResult, current, inputs.MovieRepo != nil)
 					}
 					current.Status = fileStatus
 					current.Error = errMsg
@@ -1018,7 +1028,7 @@ func interpretApplyResult(
 							logging.Warnf("[Apply] skipping success write-back for %s — result rekeyed to %s mid-phase", filePath, current.FileMatchInfo.MovieID)
 							return current, prov, nil
 						}
-						current.Movie = mergeApplyWritebackMovie(movie, result.Movie, current.Movie, afc.MovieResult, current, inputs.MovieRepo != nil)
+						current.Movie = mergeApplyWritebackMovie(afc.reviewBaseline, movie, result.Movie, current.Movie, afc.MovieResult, current, inputs.MovieRepo != nil)
 						// A successful explicit retry must clear the prior apply failure so
 						// later retries and reloads do not keep treating this row as failed.
 						if current.Status == models.JobStatusFailed {

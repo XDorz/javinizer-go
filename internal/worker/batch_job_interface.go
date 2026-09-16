@@ -18,6 +18,7 @@ type ApplyFileContext struct {
 	FilePath              string
 	Movie                 *models.Movie
 	MovieResult           *resultstore.MovieResult
+	reviewBaseline        *models.Movie
 	PublicationGeneration int64
 	// PersistedMovie means apply observed the row before publication, not merely a ContentID.
 	PersistedMovie bool

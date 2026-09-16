@@ -128,12 +128,15 @@ func mergeLiveReviewEdits(baseline, phaseOut, live *models.Movie) *models.Movie 
 	return out
 }
 
-func mergeApplyWritebackMovie(baseline, phaseOut, live *models.Movie, snapshot, current *resultstore.MovieResult, authoritative bool) *models.Movie {
-	out := mergeLiveReviewEdits(baseline, phaseOut, live)
-	if !authoritative || snapshot == nil || current == nil || snapshot.Revision != current.Revision || baseline == nil {
+func mergeApplyWritebackMovie(reviewBaseline, authoritativeBaseline, phaseOut, live *models.Movie, snapshot, current *resultstore.MovieResult, authoritative bool) *models.Movie {
+	if reviewBaseline == nil {
+		reviewBaseline = authoritativeBaseline
+	}
+	out := mergeLiveReviewEdits(reviewBaseline, phaseOut, live)
+	if !authoritative || snapshot == nil || current == nil || snapshot.Revision != current.Revision || authoritativeBaseline == nil {
 		return out
 	}
-	fresh := baseline.Clone()
+	fresh := authoritativeBaseline.Clone()
 	out.Actresses = fresh.Actresses
 	out.Credits = fresh.Credits
 	return out

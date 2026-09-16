@@ -151,7 +151,8 @@ type applyPhaseInputs struct {
 	PublicationFence database.ApplyPublicationFencer
 
 	// Current state snapshot (frozen at construction, not live)
-	Results map[string]*resultstore.MovieResult
+	Results         map[string]*resultstore.MovieResult
+	ReviewBaselines map[string]*models.Movie
 	// PersistedMovies is populated by successful pre-apply repository refresh.
 	PersistedMovies map[string]bool
 	Provenance      map[string]*resultstore.ProvenanceData
