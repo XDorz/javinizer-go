@@ -25,17 +25,28 @@ type ActressRestore = {
 };
 
 let actressRestore: ActressRestore | undefined;
+let createdActressID: number | undefined;
 
 test.afterEach(async ({ request }: { request: APIRequestContext }) => {
-	if (!actressRestore) return;
+	if (!actressRestore && !createdActressID) return;
 	await loginAgainstRealBackend(request);
-	const restore = actressRestore;
-	actressRestore = undefined;
-	const response = await request.put(BACKEND_BASE + '/api/v1/actresses/' + restore.id, {
-		data: restore.payload,
-		failOnStatusCode: false,
-	});
-	expect(response.status(), await response.text()).toBe(200);
+	if (createdActressID) {
+		const createdID = createdActressID;
+		createdActressID = undefined;
+		const response = await request.delete(BACKEND_BASE + '/api/v1/actresses/' + createdID, {
+			failOnStatusCode: false,
+		});
+		expect(response.status(), await response.text()).toBe(200);
+	}
+	if (actressRestore) {
+		const restore = actressRestore;
+		actressRestore = undefined;
+		const response = await request.put(BACKEND_BASE + '/api/v1/actresses/' + restore.id, {
+			data: restore.payload,
+			failOnStatusCode: false,
+		});
+		expect(response.status(), await response.text()).toBe(200);
+	}
 });
 
 test('PR260 browser resolve then save and reload preserves canonical cast', async ({
@@ -91,32 +102,23 @@ test('PR260 browser resolve then save and reload preserves canonical cast', asyn
 		last_name: 'Canonical',
 		japanese_name: `PR260${runTag} Canonical`,
 	};
-	const canonicalResponse = existingTarget
-		? await request.put(`${BACKEND_BASE}/api/v1/actresses/${existingTarget.id}`, {
-				data: identityPayload,
+	if (existingTarget) {
+		const releaseResponse = await request.put(
+			`${BACKEND_BASE}/api/v1/actresses/${existingTarget.id}`,
+			{
+				data: { ...actressRestore!.payload, dmm_id: 800000 + Number(runTag) },
 				failOnStatusCode: false,
-			})
-		: await request.post(`${BACKEND_BASE}/api/v1/actresses`, {
-				data: identityPayload,
-				failOnStatusCode: false,
-			});
-	expect(canonicalResponse.status(), await canonicalResponse.text()).toBe(
-		existingTarget ? 200 : 201,
-	);
-	const target = await canonicalResponse.json();
-	if (!actressRestore) {
-		actressRestore = {
-			id: target.id,
-			payload: {
-				dmm_id: 1,
-				first_name: 'Test',
-				last_name: 'Actor',
-				japanese_name: '',
-				thumb_url: '',
-				aliases: '',
 			},
-		};
+		);
+		expect(releaseResponse.status(), await releaseResponse.text()).toBe(200);
 	}
+	const canonicalResponse = await request.post(`${BACKEND_BASE}/api/v1/actresses`, {
+		data: identityPayload,
+		failOnStatusCode: false,
+	});
+	expect(canonicalResponse.status(), await canonicalResponse.text()).toBe(201);
+	const target = await canonicalResponse.json();
+	createdActressID = target.id;
 	expect(target.verified, 'fixture target must be verified').toBe(true);
 	expect(target.id, 'fixture target must have an id').toBeGreaterThan(0);
 

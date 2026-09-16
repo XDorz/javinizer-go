@@ -2,6 +2,7 @@ package actress
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -80,7 +81,7 @@ func PromoteCandidate(deps ActressDeps) gin.HandlerFunc {
 			return
 		}
 		var req promoteRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
+		if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}

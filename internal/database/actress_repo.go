@@ -46,10 +46,50 @@ func (r *ActressRepository) Create(ctx context.Context, actress *models.Actress)
 
 // Update saves all fields of the given actress record.
 func (r *ActressRepository) Update(ctx context.Context, actress *models.Actress) error {
-	if err := r.GetDB().WithContext(ctx).Save(actress).Error; err != nil {
-		return wrapDBErr("update", fmt.Sprintf("actress %s", actress.JapaneseName), err)
+	if actress == nil {
+		return wrapDBErr("update", "nil actress", ErrInvalidLookup)
 	}
-	return nil
+	if actress.ID == 0 {
+		if err := r.GetDB().WithContext(ctx).Save(actress).Error; err != nil {
+			return wrapDBErr("update", fmt.Sprintf("actress %s", actress.JapaneseName), err)
+		}
+		return nil
+	}
+	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current models.Actress
+		if err := tx.First(&current, actress.ID).Error; err != nil {
+			return wrapDBErr("update", fmt.Sprintf("actress %d", actress.ID), err)
+		}
+		identityChanged := current.FirstName != actress.FirstName ||
+			current.LastName != actress.LastName ||
+			current.JapaneseName != actress.JapaneseName ||
+			current.ThumbURL != actress.ThumbURL
+		catalogChanged := identityChanged || current.DMMID != actress.DMMID ||
+			current.Aliases != actress.Aliases || current.Verified != actress.Verified ||
+			current.Origin != actress.Origin || current.NameKey != actress.NameKey
+		if !catalogChanged {
+			*actress = current
+			return nil
+		}
+		if err := tx.Save(actress).Error; err != nil {
+			return wrapDBErr("update", fmt.Sprintf("actress %s", actress.JapaneseName), err)
+		}
+		if identityChanged {
+			if err := transitionActressCanonicalNamesTx(tx, actress.ID, &current); err != nil {
+				return err
+			}
+			if err := reconcileActressCollisionsTx(tx, actress.ID); err != nil {
+				return err
+			}
+		}
+		if err := tx.Exec(
+			"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id IN (SELECT movie_content_id FROM movie_credits WHERE actress_id = ?)",
+			actress.ID,
+		).Error; err != nil {
+			return wrapDBErr("mark dirty", fmt.Sprintf("movies for actress %d", actress.ID), err)
+		}
+		return nil
+	})
 }
 
 // RenameNameFields updates only the editable name columns (first_name,
