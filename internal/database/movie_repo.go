@@ -44,10 +44,15 @@ func (r *MovieRepository) Create(ctx context.Context, movie *models.Movie) error
 
 // Update saves all fields of an existing movie.
 func (r *MovieRepository) Update(ctx context.Context, movie *models.Movie) error {
-	if err := r.GetDB().WithContext(ctx).Save(movie).Error; err != nil {
-		return wrapDBErr("update", fmt.Sprintf("movie %s", movieEntityID(movie)), err)
-	}
-	return nil
+	contentID := movieEntityID(movie)
+	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return mutateMovieRenderInputsTx(tx, []string{contentID}, func() error {
+			if err := tx.Save(movie).Error; err != nil {
+				return wrapDBErr("update", fmt.Sprintf("movie %s", contentID), err)
+			}
+			return nil
+		})
+	})
 }
 
 // Upsert inserts or updates a movie, returning the persisted record.

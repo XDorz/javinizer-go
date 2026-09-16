@@ -141,69 +141,64 @@ func (r *MovieCreditRepository) DeleteByIDTx(tx *gorm.DB, id uint) error {
 }
 
 // UpdateOverride sets a per-movie display override on a credit and marks it user-owned.
+func (r *MovieCreditRepository) mutateCreditRenderInputs(ctx context.Context, creditID uint, mutate func(*gorm.DB) error) error {
+	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		contentID, err := movieContentIDForCreditTx(tx, creditID)
+		if err != nil {
+			return err
+		}
+		return mutateMovieRenderInputsTx(tx, []string{contentID}, func() error { return mutate(tx) })
+	})
+}
+
+// UpdateOverride sets the user-owned display override atomically.
 func (r *MovieCreditRepository) UpdateOverride(ctx context.Context, creditID uint, overrideName string, userOverride bool) error {
-	updates := map[string]interface{}{
-		colOverrideName: overrideName,
-		colUserOverride: userOverride,
-		colOrigin:       string(models.CreditOriginUser),
-	}
-	if err := r.GetDB().WithContext(ctx).Model(&models.MovieCredit{}).Where("id = ?", creditID).Updates(updates).Error; err != nil {
-		return wrapDBErr("update override", fmt.Sprintf("movie credit %d", creditID), err)
-	}
-	return nil
+	return r.mutateCreditRenderInputs(ctx, creditID, func(tx *gorm.DB) error {
+		return tx.Model(&models.MovieCredit{}).Where("id = ?", creditID).Updates(map[string]interface{}{
+			colOverrideName: overrideName, colUserOverride: userOverride, colOrigin: string(models.CreditOriginUser),
+		}).Error
+	})
 }
 
-// UpdateSuppressed toggles the user-removal tombstone on a credit.
+// UpdateSuppressed sets the user-owned suppression state atomically.
 func (r *MovieCreditRepository) UpdateSuppressed(ctx context.Context, creditID uint, suppressed bool) error {
-	updates := map[string]interface{}{
-		colSuppressed: suppressed,
-		colOrigin:     string(models.CreditOriginUser),
-	}
-	if err := r.GetDB().WithContext(ctx).Model(&models.MovieCredit{}).Where("id = ?", creditID).Updates(updates).Error; err != nil {
-		return wrapDBErr("update suppressed", fmt.Sprintf("movie credit %d", creditID), err)
-	}
-	return nil
+	return r.mutateCreditRenderInputs(ctx, creditID, func(tx *gorm.DB) error {
+		return tx.Model(&models.MovieCredit{}).Where("id = ?", creditID).Updates(map[string]interface{}{
+			colSuppressed: suppressed, colOrigin: string(models.CreditOriginUser),
+		}).Error
+	})
 }
 
-// UpdateOrderPinned sets a user-owned cast position on a credit.
+// UpdateOrderPinned sets the user-owned cast order atomically.
 func (r *MovieCreditRepository) UpdateOrderPinned(ctx context.Context, creditID uint, orderIndex int, pinned bool) error {
-	updates := map[string]interface{}{
-		colOrderIndex:  orderIndex,
-		colOrderPinned: pinned,
-		colOrigin:      string(models.CreditOriginUser),
-	}
-	if err := r.GetDB().WithContext(ctx).Model(&models.MovieCredit{}).Where("id = ?", creditID).Updates(updates).Error; err != nil {
-		return wrapDBErr("update order", fmt.Sprintf("movie credit %d", creditID), err)
-	}
-	return nil
+	return r.mutateCreditRenderInputs(ctx, creditID, func(tx *gorm.DB) error {
+		return tx.Model(&models.MovieCredit{}).Where("id = ?", creditID).Updates(map[string]interface{}{
+			colOrderIndex: orderIndex, colOrderPinned: pinned, colOrigin: string(models.CreditOriginUser),
+		}).Error
+	})
 }
 
-// SetDisplayForceCanonical forces or clears the canonical display preference on a credit.
+// SetDisplayForceCanonical sets canonical display selection atomically.
 func (r *MovieCreditRepository) SetDisplayForceCanonical(ctx context.Context, creditID uint, forced bool) error {
-	if err := r.GetDB().WithContext(ctx).Model(&models.MovieCredit{}).Where("id = ?", creditID).
-		Update("display_force_canonical", forced).Error; err != nil {
-		return wrapDBErr("update force canonical", fmt.Sprintf("movie credit %d", creditID), err)
-	}
-	return nil
+	return r.mutateCreditRenderInputs(ctx, creditID, func(tx *gorm.DB) error {
+		return tx.Model(&models.MovieCredit{}).Where("id = ?", creditID).Update("display_force_canonical", forced).Error
+	})
 }
 
 // ReassignCredit moves a credit to a different identity within one transaction,
 // applying the D12 collision field rules.
 func (r *MovieCreditRepository) ReassignCredit(ctx context.Context, credit *models.MovieCredit, targetActressID uint) error {
 	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return reassignCreditTx(tx, credit, targetActressID)
+		contentID := credit.MovieContentID
+		if contentID == "" {
+			var err error
+			contentID, err = movieContentIDForCreditTx(tx, credit.ID)
+			if err != nil {
+				return err
+			}
+		}
+		return mutateMovieRenderInputsTx(tx, []string{contentID}, func() error { return reassignCreditTx(tx, credit, targetActressID) })
 	})
-}
-
-// MarkMovieDirty marks a movie render-dirty with a generation bump.
-func (r *MovieCreditRepository) MarkMovieDirty(ctx context.Context, movieContentID string) error {
-	if err := r.GetDB().WithContext(ctx).Exec(
-		"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id = ?",
-		movieContentID,
-	).Error; err != nil {
-		return wrapDBErr("mark dirty", fmt.Sprintf("movie %s", movieContentID), err)
-	}
-	return nil
 }
 
 // CountByActress returns the number of credits held by an actress.

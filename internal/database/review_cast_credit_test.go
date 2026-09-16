@@ -114,7 +114,7 @@ func TestLegacyCastEditReconcileErrors(t *testing.T) {
 		require.NoError(t, db.Create(&added).Error)
 		movie.Actresses = []models.Actress{actress, added}
 		require.NoError(t, db.Exec("CREATE TRIGGER fail_legacy_dirty BEFORE UPDATE OF render_dirty ON movies BEGIN SELECT RAISE(ABORT, 'injected'); END").Error)
-		err := repo.upserter.reconcileLegacyActressEditsTx(db.DB, &movie)
+		_, err := repo.Upsert(t.Context(), &movie)
 		require.Error(t, err)
 	})
 	t.Run("suppress", func(t *testing.T) {

@@ -78,6 +78,11 @@ func TestCreditEndpointLifecycle(t *testing.T) {
 	require.NoError(t, db.First(&actress, actress.ID).Error)
 	require.Equal(t, "Candidate", actress.FirstName)
 	require.Equal(t, "original", actress.ThumbURL)
+	require.NoError(t, db.First(&movie, "content_id = ?", movie.ContentID).Error)
+	afterPromotion := movie.RenderGeneration
+	request("PUT", "/actresses/"+itoa(actress.ID), `{"first_name":"Candidate","last_name":"Name","thumb_url":"original","aliases":"Matching Evidence"}`, 200)
+	require.NoError(t, db.First(&movie, "content_id = ?", movie.ContentID).Error)
+	require.Equal(t, afterPromotion, movie.RenderGeneration)
 	request("POST", "/actresses/candidates/"+itoa(actress.ID)+"/promote", "{}", 409)
 	request("POST", "/actresses/collisions/"+itoa(collision.ID)+"/resolve", `{"resolution":"invalid"}`, 400)
 	for _, action := range []string{"override", "suppress"} {
@@ -87,6 +92,11 @@ func TestCreditEndpointLifecycle(t *testing.T) {
 	require.NoError(t, db.First(&credit, credit.ID).Error)
 	require.True(t, credit.UserOverride)
 	require.Equal(t, "Per movie", credit.OverrideName)
+	require.NoError(t, db.First(&movie, "content_id = ?", movie.ContentID).Error)
+	afterOverride := movie.RenderGeneration
+	request("POST", "/actresses/credits/"+itoa(credit.ID)+"/override", `{"override_name":"Per movie","user_override":true}`, 200)
+	require.NoError(t, db.First(&movie, "content_id = ?", movie.ContentID).Error)
+	require.Equal(t, afterOverride, movie.RenderGeneration)
 	request("POST", "/actresses/credits/"+itoa(credit.ID)+"/suppress", `{"suppressed":true}`, 200)
 	require.NoError(t, db.First(&credit, credit.ID).Error)
 	require.True(t, credit.Suppressed)

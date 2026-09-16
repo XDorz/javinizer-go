@@ -369,6 +369,14 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 
 	updatedMovies := 0
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		contentIDs, err := movieContentIDsForActressesTx(tx, targetID, sourceID)
+		if err != nil {
+			return err
+		}
+		before, err := captureMovieRenderSnapshotsTx(tx, contentIDs)
+		if err != nil {
+			return err
+		}
 		if merged.DMMID > 0 {
 			var existing models.Actress
 			checkErr := tx.Where("dmm_id = ? AND id NOT IN ?", merged.DMMID, []uint{targetID, sourceID}).First(&existing).Error
@@ -442,13 +450,6 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 			return wrapDBErr("merge", fmt.Sprintf("credit reassignments from %d to %d", sourceID, targetID), err)
 		}
 
-		if err := tx.Exec(
-			"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id IN (SELECT movie_content_id FROM movie_credits WHERE actress_id = ?)",
-			targetID,
-		).Error; err != nil {
-			return wrapDBErr("merge", fmt.Sprintf("dirty crediting movies for target %d", targetID), err)
-		}
-
 		if err := upsertActressAliases(tx, plan.SourceAliasUpserts, plan.CanonicalName); err != nil {
 			return wrapDBErr("merge", fmt.Sprintf("actress aliases for %s", plan.CanonicalName), err)
 		}
@@ -457,7 +458,7 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 			return wrapDBErr("delete", fmt.Sprintf("merge source actress %d", sourceID), err)
 		}
 
-		return nil
+		return invalidateChangedMovieRenderInputsTx(tx, before, contentIDs)
 	})
 	if err != nil {
 		return nil, err

@@ -689,7 +689,11 @@ func TestPR260ExecuteMergeLateErrors(t *testing.T) {
 			require.NoError(t, db.Create(&source).Error)
 			movie := models.Movie{ContentID: "merge-late-" + stage, ID: "merge-late-" + stage}
 			require.NoError(t, db.Create(&movie).Error)
-			require.NoError(t, db.Create(&models.MovieCredit{MovieContentID: movie.ContentID, ActressID: target.ID}).Error)
+			creditedActressID := target.ID
+			if stage == "dirty" {
+				creditedActressID = source.ID
+			}
+			require.NoError(t, db.Create(&models.MovieCredit{MovieContentID: movie.ContentID, ActressID: creditedActressID}).Error)
 			plan, err := repo.merger.PlanMerge(context.Background(), target.ID, source.ID, nil)
 			require.NoError(t, err)
 			if stage == "credits" {

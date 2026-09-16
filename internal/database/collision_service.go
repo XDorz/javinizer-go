@@ -164,13 +164,6 @@ func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution s
 		if err := restoreActressProjectionTx(tx, credit.ActressID); err != nil {
 			return 0, err
 		}
-	} else if resolution != models.CollisionResolutionReassign {
-		if err := tx.Exec(
-			"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id = ?",
-			collision.MovieContentID,
-		).Error; err != nil {
-			return 0, wrapDBErr("mark dirty", fmt.Sprintf("movie %s", collision.MovieContentID), err)
-		}
 	}
 
 	var remainingCount int64
@@ -193,9 +186,24 @@ func (s *CollisionService) Resolve(ctx context.Context, collisionID uint, resolu
 	}
 	var remainingOut int
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		r, e := s.resolveTx(tx, collisionID, resolution, targetActressID)
-		remainingOut = r
-		return e
+		var collision models.CreditCollision
+		if err := tx.First(&collision, collisionID).Error; err != nil {
+			return err
+		}
+		var credit models.MovieCredit
+		if err := tx.First(&credit, collision.CreditID).Error; err != nil {
+			return err
+		}
+		contentIDs, err := movieContentIDsForActressesTx(tx, credit.ActressID)
+		if err != nil {
+			return err
+		}
+		contentIDs = uniqueContentIDs(append(contentIDs, collision.MovieContentID))
+		return mutateMovieRenderInputsTx(tx, contentIDs, func() error {
+			r, e := s.resolveTx(tx, collisionID, resolution, targetActressID)
+			remainingOut = r
+			return e
+		})
 	})
 	if err != nil {
 		return 0, err
@@ -207,27 +215,20 @@ func (s *CollisionService) Resolve(ctx context.Context, collisionID uint, resolu
 // dirties the crediting movie.
 func (s *CollisionService) UpdateCreditOverride(ctx context.Context, creditID uint, overrideName string, userOverride bool) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		updates := map[string]interface{}{
-			colOverrideName: overrideName,
-			colUserOverride: userOverride,
-			colOrigin:       string(models.CreditOriginUser),
-			colUpdatedAt:    time.Now().UTC(),
-		}
-		res := tx.Model(&models.MovieCredit{}).Where("id = ?", creditID).Updates(updates)
-		if res.Error != nil {
-			return wrapDBErr("update override", fmt.Sprintf("movie credit %d", creditID), res.Error)
-		}
-		if res.RowsAffected == 0 {
-			return fmt.Errorf("update override: movie credit %d: %w", creditID, ErrNotFound)
-		}
-		var contentID string
-		if err := tx.Model(&models.MovieCredit{}).Where("id = ?", creditID).Pluck("movie_content_id", &contentID).Error; err != nil {
+		contentID, err := movieContentIDForCreditTx(tx, creditID)
+		if err != nil {
 			return err
 		}
-		return tx.Exec(
-			"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id = ?",
-			contentID,
-		).Error
+		return mutateMovieRenderInputsTx(tx, []string{contentID}, func() error {
+			res := tx.Model(&models.MovieCredit{}).Where("id = ?", creditID).Updates(map[string]interface{}{
+				colOverrideName: overrideName, colUserOverride: userOverride,
+				colOrigin: string(models.CreditOriginUser), colUpdatedAt: time.Now().UTC(),
+			})
+			if res.Error != nil {
+				return wrapDBErr("update override", fmt.Sprintf("movie credit %d", creditID), res.Error)
+			}
+			return nil
+		})
 	})
 }
 
@@ -235,7 +236,11 @@ func (s *CollisionService) UpdateCreditOverride(ctx context.Context, creditID ui
 // closes its open collisions when suppressed.
 func (s *CollisionService) SetCreditSuppressed(ctx context.Context, creditID uint, suppressed bool) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return setCreditSuppressedTx(tx, creditID, suppressed)
+		contentID, err := movieContentIDForCreditTx(tx, creditID)
+		if err != nil {
+			return err
+		}
+		return mutateMovieRenderInputsTx(tx, []string{contentID}, func() error { return setCreditSuppressedTx(tx, creditID, suppressed) })
 	})
 }
 
@@ -297,10 +302,7 @@ func setCreditSuppressedTx(tx *gorm.DB, creditID uint, suppressed bool) error {
 	`, credit.MovieContentID, credit.ActressID, credit.ActressID, true).Error; err != nil {
 		return err
 	}
-	return tx.Exec(
-		"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id = ?",
-		credit.MovieContentID,
-	).Error
+	return nil
 }
 
 func restoreSuppressedCreditCollisionsTx(tx *gorm.DB, credit *models.MovieCredit) error {
@@ -674,12 +676,6 @@ func reassignCreditTx(tx *gorm.DB, credit *models.MovieCredit, targetActressID u
 	}
 	if err := reconcileActressCollisionsTx(tx, targetActressID); err != nil {
 		return err
-	}
-	if err := tx.Exec(
-		"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id = ?",
-		credit.MovieContentID,
-	).Error; err != nil {
-		return wrapDBErr("mark dirty", fmt.Sprintf("movie %s", credit.MovieContentID), err)
 	}
 	return nil
 }

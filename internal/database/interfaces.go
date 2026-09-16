@@ -79,7 +79,6 @@ type MovieCreditRepositoryInterface interface {
 	ListByActress(ctx context.Context, actressID uint) ([]models.MovieCredit, error)
 	FindByCreditID(ctx context.Context, creditID uint) (*models.MovieCredit, error)
 	ReassignCredit(ctx context.Context, credit *models.MovieCredit, targetActressID uint) error
-	MarkMovieDirty(ctx context.Context, movieContentID string) error
 }
 
 // CreditCollisionRepositoryInterface defines the contract for collision lifecycle operations.

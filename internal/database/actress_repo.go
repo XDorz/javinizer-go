@@ -56,6 +56,14 @@ func (r *ActressRepository) Update(ctx context.Context, actress *models.Actress)
 		return nil
 	}
 	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		contentIDs, err := movieContentIDsForActressesTx(tx, actress.ID)
+		if err != nil {
+			return err
+		}
+		before, err := captureMovieRenderSnapshotsTx(tx, contentIDs)
+		if err != nil {
+			return err
+		}
 		var current models.Actress
 		if err := tx.First(&current, actress.ID).Error; err != nil {
 			return wrapDBErr("update", fmt.Sprintf("actress %d", actress.ID), err)
@@ -82,13 +90,7 @@ func (r *ActressRepository) Update(ctx context.Context, actress *models.Actress)
 				return err
 			}
 		}
-		if err := tx.Exec(
-			"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id IN (SELECT movie_content_id FROM movie_credits WHERE actress_id = ?)",
-			actress.ID,
-		).Error; err != nil {
-			return wrapDBErr("mark dirty", fmt.Sprintf("movies for actress %d", actress.ID), err)
-		}
-		return nil
+		return invalidateChangedMovieRenderInputsTx(tx, before, contentIDs)
 	})
 }
 
@@ -108,6 +110,14 @@ func (r *ActressRepository) RenameNameFields(ctx context.Context, id uint, first
 		colJapaneseName: japaneseName,
 	}
 	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		contentIDs, err := movieContentIDsForActressesTx(tx, id)
+		if err != nil {
+			return err
+		}
+		before, err := captureMovieRenderSnapshotsTx(tx, contentIDs)
+		if err != nil {
+			return err
+		}
 		var current models.Actress
 		if err := tx.First(&current, id).Error; err != nil {
 			return wrapDBErr("rename", fmt.Sprintf("actress %d", id), err)
@@ -121,13 +131,7 @@ func (r *ActressRepository) RenameNameFields(ctx context.Context, id uint, first
 		if err := reconcileActressCollisionsTx(tx, id); err != nil {
 			return err
 		}
-		if err := tx.Exec(
-			"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id IN (SELECT movie_content_id FROM movie_credits WHERE actress_id = ?)",
-			id,
-		).Error; err != nil {
-			return wrapDBErr("mark dirty", fmt.Sprintf("movies for actress %d", id), err)
-		}
-		return nil
+		return invalidateChangedMovieRenderInputsTx(tx, before, contentIDs)
 	})
 }
 
@@ -139,11 +143,13 @@ func (r *ActressRepository) FindByID(ctx context.Context, id uint) (*models.Actr
 // Delete removes the actress with the given primary key.
 func (r *ActressRepository) Delete(ctx context.Context, id uint) error {
 	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec(
-			"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id IN (SELECT movie_content_id FROM movie_credits WHERE actress_id = ?)",
-			id,
-		).Error; err != nil {
-			return wrapDBErr("mark dirty", fmt.Sprintf("movies for actress %d", id), err)
+		contentIDs, err := movieContentIDsForActressesTx(tx, id)
+		if err != nil {
+			return err
+		}
+		before, err := captureMovieRenderSnapshotsTx(tx, contentIDs)
+		if err != nil {
+			return err
 		}
 		if err := deleteCreditReassignmentsTx(tx, "source_actress_id = ? OR target_actress_id = ?", fmt.Sprintf("actress %d", id), id, id); err != nil {
 			return err
@@ -157,7 +163,7 @@ func (r *ActressRepository) Delete(ctx context.Context, id uint) error {
 		if err := tx.Delete(&models.Actress{}, id).Error; err != nil {
 			return wrapDBErr("delete", fmt.Sprintf("actress %d", id), err)
 		}
-		return nil
+		return invalidateChangedMovieRenderInputsTx(tx, before, contentIDs)
 	})
 }
 
@@ -485,7 +491,13 @@ func (r *ActressRepository) CountCandidates(ctx context.Context) (int64, error) 
 // identity with the user-confirmed canonical fields.
 func (r *ActressRepository) PromoteCandidate(ctx context.Context, id uint, firstName, lastName, japaneseName, thumbURL string) error {
 	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return promoteCandidateTx(tx, id, firstName, lastName, japaneseName, thumbURL)
+		contentIDs, err := movieContentIDsForActressesTx(tx, id)
+		if err != nil {
+			return err
+		}
+		return mutateMovieRenderInputsTx(tx, contentIDs, func() error {
+			return promoteCandidateTx(tx, id, firstName, lastName, japaneseName, thumbURL)
+		})
 	})
 }
 
@@ -528,18 +540,31 @@ func (r *ActressRepository) SetUserOwned(ctx context.Context, id uint) error {
 // fields, marks the row user-owned, and dirties crediting movies.
 func (r *ActressRepository) UpdateCanonicalFields(ctx context.Context, id uint, firstName, lastName, japaneseName, thumbURL string) error {
 	updates := map[string]interface{}{
-		colFirstName:    firstName,
-		colLastName:     lastName,
-		colJapaneseName: japaneseName,
-		"thumb_url":     thumbURL,
-		"origin":        ActressOriginUser,
-		"verified":      true,
+		colFirstName: firstName, colLastName: lastName, colJapaneseName: japaneseName,
+		"thumb_url": thumbURL, "origin": ActressOriginUser, "verified": true,
 	}
-	if err := r.GetDB().WithContext(ctx).Model(&models.Actress{}).Where("id = ?", id).Updates(updates).Error; err != nil {
-		return wrapDBErr("update canonical", fmt.Sprintf("actress %d", id), err)
-	}
-	r.markCreditingMoviesDirty(ctx, id)
-	return nil
+	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		contentIDs, err := movieContentIDsForActressesTx(tx, id)
+		if err != nil {
+			return err
+		}
+		return mutateMovieRenderInputsTx(tx, contentIDs, func() error {
+			var current models.Actress
+			if err := tx.First(&current, id).Error; err != nil {
+				return wrapDBErr("update canonical", fmt.Sprintf("actress %d", id), err)
+			}
+			if err := tx.Model(&models.Actress{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+				return wrapDBErr("update canonical", fmt.Sprintf("actress %d", id), err)
+			}
+			if err := transitionActressCanonicalNamesTx(tx, id, &current); err != nil {
+				return err
+			}
+			if err := reconcileActressCollisionsTx(tx, id); err != nil {
+				return err
+			}
+			return restoreActressProjectionTx(tx, id)
+		})
+	})
 }
 
 // ImportUpsert upserts a curated-import actress, skipping protected
@@ -582,11 +607,19 @@ func (r *ActressRepository) ImportUpsert(ctx context.Context, incoming *models.A
 		incoming.ThumbURL = existing.ThumbURL
 	}
 	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		contentIDs, err := movieContentIDsForActressesTx(tx, incoming.ID)
+		if err != nil {
+			return err
+		}
+		before, err := captureMovieRenderSnapshotsTx(tx, contentIDs)
+		if err != nil {
+			return err
+		}
 		if err := tx.Save(incoming).Error; err != nil {
 			return wrapDBErr("save", fmt.Sprintf("imported actress %s", incoming.FullName()), err)
 		}
 		if !promotingCandidate {
-			return nil
+			return invalidateChangedMovieRenderInputsTx(tx, before, contentIDs)
 		}
 		if err := transitionActressCanonicalNamesTx(tx, incoming.ID, &previousIdentity); err != nil {
 			return err
@@ -594,7 +627,10 @@ func (r *ActressRepository) ImportUpsert(ctx context.Context, incoming *models.A
 		if err := resolveCandidateIdentityCollisionsTx(tx, incoming.ID); err != nil {
 			return err
 		}
-		return restoreActressProjectionTx(tx, incoming.ID)
+		if err := restoreActressProjectionTx(tx, incoming.ID); err != nil {
+			return err
+		}
+		return invalidateChangedMovieRenderInputsTx(tx, before, contentIDs)
 	})
 }
 
@@ -761,25 +797,7 @@ func restoreActressProjectionTx(tx *gorm.DB, actressID uint) error {
 		WHERE actress_id = ? AND suppressed = ?`, actressID, false).Error; err != nil {
 		return wrapDBErr("restore", fmt.Sprintf("legacy actress associations for %d", actressID), err)
 	}
-	if err := tx.Exec(
-		"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id IN (SELECT movie_content_id FROM movie_credits WHERE actress_id = ?)",
-		actressID,
-	).Error; err != nil {
-		return wrapDBErr("mark dirty", fmt.Sprintf("movies for actress %d", actressID), err)
-	}
 	return nil
-}
-
-func (r *ActressRepository) markCreditingMoviesDirty(ctx context.Context, actressID uint) {
-	if r.GetDB() == nil || actressID == 0 {
-		return
-	}
-	if err := r.GetDB().WithContext(ctx).Exec(
-		"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id IN (SELECT movie_content_id FROM movie_credits WHERE actress_id = ?)",
-		actressID,
-	).Error; err != nil {
-		logging.Warnf("dirty-mark crediting movies for actress %d failed: %v", actressID, err)
-	}
 }
 
 func (r *ActressRepository) catalogQuery(ctx context.Context) *gorm.DB {

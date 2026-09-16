@@ -123,7 +123,7 @@ func TestPR260MarkMovieRenderInputsChangedRejectsLostRow(t *testing.T) {
 	before := &models.Movie{ContentID: "lost-render-row", Title: "Before", RenderGeneration: 3}
 	after := before.Clone()
 	after.Title = "After"
-	err := markMovieRenderInputsChangedTx(db.DB, before, after)
+	err := invalidateMovieRenderGenerationTx(db.DB, before, after)
 	require.ErrorIs(t, err, ErrApplyPublicationStale)
 	require.Equal(t, int64(3), after.RenderGeneration)
 	require.False(t, after.RenderDirty)

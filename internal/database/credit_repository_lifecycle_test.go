@@ -23,7 +23,6 @@ func TestCreditRepositoriesLifecycle(t *testing.T) {
 	require.ErrorIs(t, err, ErrNotFound)
 	require.NoError(t, credits.UpdateOrderPinned(ctx, credit.ID, 4, true))
 	require.NoError(t, credits.SetDisplayForceCanonical(ctx, credit.ID, true))
-	require.NoError(t, credits.MarkMovieDirty(ctx, credit.MovieContentID))
 	list, err := credits.ListByActress(ctx, credit.ActressID)
 	require.NoError(t, err)
 	require.Len(t, list, 1)
@@ -109,7 +108,6 @@ func TestCreditRepositoriesCancellationErrors(t *testing.T) {
 	require.Error(t, r.UpdateSuppressed(ctx, credit.ID, true))
 	require.Error(t, r.UpdateOrderPinned(ctx, credit.ID, 1, true))
 	require.Error(t, r.SetDisplayForceCanonical(ctx, credit.ID, true))
-	require.Error(t, r.MarkMovieDirty(ctx, credit.MovieContentID))
 	_, err = c.ListOpenByMovie(ctx, "x")
 	require.Error(t, err)
 	_, err = c.ListOpenByActress(ctx, credit.ActressID)
@@ -483,7 +481,6 @@ func TestIdentityCatalogOwnershipAndImports(t *testing.T) {
 	translations, err := r.FreshTranslationsByActress(ctx, a.ID)
 	require.NoError(t, err)
 	require.Empty(t, translations)
-	r.markCreditingMoviesDirty(ctx, 0)
 }
 
 func TestIdentityCatalogCancellationErrors(t *testing.T) {
@@ -510,5 +507,4 @@ func TestIdentityCatalogCancellationErrors(t *testing.T) {
 	require.Error(t, err)
 	_, err = r.FreshTranslationsByActress(ctx, credit.ActressID)
 	require.Error(t, err)
-	r.markCreditingMoviesDirty(ctx, credit.ActressID)
 }

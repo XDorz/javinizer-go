@@ -503,63 +503,6 @@ func (_c *MockMovieCreditRepositoryInterface_ListByMovie_Call) RunAndReturn(run 
 	return _c
 }
 
-// MarkMovieDirty provides a mock function for the type MockMovieCreditRepositoryInterface
-func (_mock *MockMovieCreditRepositoryInterface) MarkMovieDirty(ctx context.Context, movieContentID string) error {
-	ret := _mock.Called(ctx, movieContentID)
-
-	if len(ret) == 0 {
-		panic("no return value specified for MarkMovieDirty")
-	}
-
-	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) error); ok {
-		r0 = returnFunc(ctx, movieContentID)
-	} else {
-		r0 = ret.Error(0)
-	}
-	return r0
-}
-
-// MockMovieCreditRepositoryInterface_MarkMovieDirty_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MarkMovieDirty'
-type MockMovieCreditRepositoryInterface_MarkMovieDirty_Call struct {
-	*mock.Call
-}
-
-// MarkMovieDirty is a helper method to define mock.On call
-//   - ctx context.Context
-//   - movieContentID string
-func (_e *MockMovieCreditRepositoryInterface_Expecter) MarkMovieDirty(ctx any, movieContentID any) *MockMovieCreditRepositoryInterface_MarkMovieDirty_Call {
-	return &MockMovieCreditRepositoryInterface_MarkMovieDirty_Call{Call: _e.mock.On("MarkMovieDirty", ctx, movieContentID)}
-}
-
-func (_c *MockMovieCreditRepositoryInterface_MarkMovieDirty_Call) Run(run func(ctx context.Context, movieContentID string)) *MockMovieCreditRepositoryInterface_MarkMovieDirty_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
-		if args[0] != nil {
-			arg0 = args[0].(context.Context)
-		}
-		var arg1 string
-		if args[1] != nil {
-			arg1 = args[1].(string)
-		}
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *MockMovieCreditRepositoryInterface_MarkMovieDirty_Call) Return(err error) *MockMovieCreditRepositoryInterface_MarkMovieDirty_Call {
-	_c.Call.Return(err)
-	return _c
-}
-
-func (_c *MockMovieCreditRepositoryInterface_MarkMovieDirty_Call) RunAndReturn(run func(ctx context.Context, movieContentID string) error) *MockMovieCreditRepositoryInterface_MarkMovieDirty_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // ReassignCredit provides a mock function for the type MockMovieCreditRepositoryInterface
 func (_mock *MockMovieCreditRepositoryInterface) ReassignCredit(ctx context.Context, credit *models.MovieCredit, targetActressID uint) error {
 	ret := _mock.Called(ctx, credit, targetActressID)

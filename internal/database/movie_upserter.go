@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"strings"
 	"time"
 
@@ -42,7 +41,7 @@ type movieRenderInputs struct {
 }
 
 type movieTranslationRenderInput struct {
-	Language, Title, OriginalTitle, Description, Director, Maker, Label, Series, SourceName, SettingsHash string
+	Language, Title, OriginalTitle, Description, Director, Maker, Label, Series string
 }
 
 type actressRenderInput struct {
@@ -59,7 +58,7 @@ type movieCreditRenderInput struct {
 	Actress                                                         *actressRenderInput
 }
 
-func persistedMovieRenderInputs(movie *models.Movie) movieRenderInputs {
+func artifactRenderProjection(movie *models.Movie) movieRenderInputs {
 	out := movieRenderInputs{
 		ID: movie.ID, DisplayTitle: movie.DisplayTitle, Title: movie.Title, OriginalTitle: movie.OriginalTitle,
 		Description: movie.Description, ReleaseYear: movie.ReleaseYear, Runtime: movie.Runtime, Director: movie.Director,
@@ -78,7 +77,7 @@ func persistedMovieRenderInputs(movie *models.Movie) movieRenderInputs {
 		out.Translations = append(out.Translations, movieTranslationRenderInput{
 			Language: translation.Language, Title: translation.Title, OriginalTitle: translation.OriginalTitle,
 			Description: translation.Description, Director: translation.Director, Maker: translation.Maker,
-			Label: translation.Label, Series: translation.Series, SourceName: translation.SourceName, SettingsHash: translation.SettingsHash,
+			Label: translation.Label, Series: translation.Series,
 		})
 	}
 	for _, credit := range movie.Credits {
@@ -114,12 +113,8 @@ func loadPersistedMovieForRenderComparison(tx *gorm.DB, contentID string) (*mode
 	return movie.Clone(), nil
 }
 
-func movieRenderInputsChanged(before, after *models.Movie) bool {
-	return !reflect.DeepEqual(persistedMovieRenderInputs(before), persistedMovieRenderInputs(after))
-}
-
-func markMovieRenderInputsChangedTx(tx *gorm.DB, before, after *models.Movie) error {
-	if before == nil || after == nil || !movieRenderInputsChanged(before, after) || after.RenderGeneration != before.RenderGeneration {
+func invalidateMovieRenderGenerationTx(tx *gorm.DB, before, after *models.Movie) error {
+	if before == nil || after == nil || after.RenderGeneration != before.RenderGeneration {
 		return nil
 	}
 	updated := tx.Model(&models.Movie{}).Where("content_id = ? AND render_generation = ?", after.ContentID, before.RenderGeneration).
@@ -186,11 +181,11 @@ func (u *MovieUpserter) UpsertWithTranslations(ctx context.Context, movie *model
 			if err != nil {
 				return err
 			}
-			var beforeRender *models.Movie
+			var beforeRender movieRenderSnapshot
 			if existingFound {
-				beforeRender, err = loadPersistedMovieForRenderComparison(tx, movie.ContentID)
+				beforeRender, err = captureMovieRenderSnapshotsTx(tx, []string{movie.ContentID})
 				if err != nil {
-					return wrapDBErr("snapshot render inputs", fmt.Sprintf("movie %s", movie.ContentID), err)
+					return err
 				}
 			} else {
 				movie.RenderDirty = false
@@ -239,8 +234,11 @@ func (u *MovieUpserter) UpsertWithTranslations(ctx context.Context, movie *model
 				return err
 			}
 			loaded.Credits = credits
-			if err := markMovieRenderInputsChangedTx(tx, beforeRender, &loaded); err != nil {
+			if err := invalidateChangedMovieRenderInputsTx(tx, beforeRender, []string{movie.ContentID}); err != nil {
 				return err
+			}
+			if err := tx.Model(&models.Movie{}).Select("render_dirty", "render_generation").Where("content_id = ?", movie.ContentID).First(&loaded).Error; err != nil {
+				return wrapDBErr("reload render state", fmt.Sprintf("movie %s", movie.ContentID), err)
 			}
 			result = &loaded
 			return nil
@@ -378,12 +376,6 @@ func (u *MovieUpserter) reconcileLegacyActressEditsTx(tx *gorm.DB, movie *models
 			OrderPinned:          true,
 		}
 		if err := creditRepo.UpsertTx(tx, credit); err != nil {
-			return err
-		}
-		if err := tx.Exec(
-			"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id = ?",
-			movie.ContentID,
-		).Error; err != nil {
 			return err
 		}
 	}
