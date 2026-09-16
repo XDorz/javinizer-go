@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"gorm.io/gorm"
@@ -21,6 +23,116 @@ type MovieUpserter struct {
 // through the given MovieRepository.
 func NewMovieUpserter(repo *MovieRepository) *MovieUpserter {
 	return &MovieUpserter{repo: repo}
+}
+
+type movieRenderInputs struct {
+	ID, DisplayTitle, Title, OriginalTitle, Description string
+	ReleaseDate                                         *time.Time
+	ReleaseYear, Runtime                                int
+	Director, Maker, Label, Series                      string
+	RatingScore                                         float64
+	RatingVotes                                         int
+	Poster                                              models.PosterState
+	TrailerURL, OriginalFileName                        string
+	Genres                                              []string
+	Screenshots                                         []string
+	Translations                                        []movieTranslationRenderInput
+	Credits                                             []movieCreditRenderInput
+	LegacyActresses                                     []actressRenderInput
+}
+
+type movieTranslationRenderInput struct {
+	Language, Title, OriginalTitle, Description, Director, Maker, Label, Series, SourceName, SettingsHash string
+}
+
+type actressRenderInput struct {
+	ID                                          uint
+	FirstName, LastName, JapaneseName, ThumbURL string
+	Verified                                    bool
+}
+
+type movieCreditRenderInput struct {
+	ActressID                                                       uint
+	CreditedName, CreditedJapaneseName, OverrideName                string
+	OrderIndex                                                      int
+	UserOverride, Suppressed, LegacyInferred, DisplayForceCanonical bool
+	Actress                                                         *actressRenderInput
+}
+
+func persistedMovieRenderInputs(movie *models.Movie) movieRenderInputs {
+	out := movieRenderInputs{
+		ID: movie.ID, DisplayTitle: movie.DisplayTitle, Title: movie.Title, OriginalTitle: movie.OriginalTitle,
+		Description: movie.Description, ReleaseYear: movie.ReleaseYear, Runtime: movie.Runtime, Director: movie.Director,
+		Maker: movie.Maker, Label: movie.Label, Series: movie.Series, RatingScore: movie.RatingScore, RatingVotes: movie.RatingVotes,
+		Poster: movie.Poster.Clone(), TrailerURL: movie.TrailerURL, OriginalFileName: movie.OriginalFileName,
+		Screenshots: append([]string(nil), movie.Screenshots...),
+	}
+	if movie.ReleaseDate != nil {
+		value := *movie.ReleaseDate
+		out.ReleaseDate = &value
+	}
+	for _, genre := range movie.Genres {
+		out.Genres = append(out.Genres, genre.Name)
+	}
+	for _, translation := range movie.Translations {
+		out.Translations = append(out.Translations, movieTranslationRenderInput{
+			Language: translation.Language, Title: translation.Title, OriginalTitle: translation.OriginalTitle,
+			Description: translation.Description, Director: translation.Director, Maker: translation.Maker,
+			Label: translation.Label, Series: translation.Series, SourceName: translation.SourceName, SettingsHash: translation.SettingsHash,
+		})
+	}
+	for _, credit := range movie.Credits {
+		input := movieCreditRenderInput{
+			ActressID: credit.ActressID, CreditedName: credit.CreditedName, CreditedJapaneseName: credit.CreditedJapaneseName,
+			OverrideName: credit.OverrideName, OrderIndex: credit.OrderIndex, UserOverride: credit.UserOverride,
+			Suppressed: credit.Suppressed, LegacyInferred: credit.LegacyInferred, DisplayForceCanonical: credit.DisplayForceCanonical,
+		}
+		if credit.Actress != nil {
+			actress := actressRenderInput{ID: credit.Actress.ID, FirstName: credit.Actress.FirstName, LastName: credit.Actress.LastName, JapaneseName: credit.Actress.JapaneseName, ThumbURL: credit.Actress.ThumbURL, Verified: credit.Actress.Verified}
+			input.Actress = &actress
+		}
+		out.Credits = append(out.Credits, input)
+	}
+	if len(movie.Credits) == 0 {
+		for _, actress := range movie.Actresses {
+			out.LegacyActresses = append(out.LegacyActresses, actressRenderInput{ID: actress.ID, FirstName: actress.FirstName, LastName: actress.LastName, JapaneseName: actress.JapaneseName, ThumbURL: actress.ThumbURL, Verified: actress.Verified})
+		}
+	}
+	return out
+}
+
+func loadPersistedMovieForRenderComparison(tx *gorm.DB, contentID string) (*models.Movie, error) {
+	var movie models.Movie
+	if err := tx.Preload("Actresses").Preload("Genres").Preload("Translations", func(db *gorm.DB) *gorm.DB { return db.Order("language ASC") }).First(&movie, "content_id = ?", contentID).Error; err != nil {
+		return nil, err
+	}
+	var credits []models.MovieCredit
+	if err := tx.Preload("Actress").Where("movie_content_id = ?", movie.ContentID).Order("order_index ASC, id ASC").Find(&credits).Error; err != nil {
+		return nil, wrapDBErr("snapshot render credits", fmt.Sprintf("movie %s", contentID), err)
+	}
+	movie.Credits = credits
+	return movie.Clone(), nil
+}
+
+func movieRenderInputsChanged(before, after *models.Movie) bool {
+	return !reflect.DeepEqual(persistedMovieRenderInputs(before), persistedMovieRenderInputs(after))
+}
+
+func markMovieRenderInputsChangedTx(tx *gorm.DB, before, after *models.Movie) error {
+	if before == nil || after == nil || !movieRenderInputsChanged(before, after) || after.RenderGeneration != before.RenderGeneration {
+		return nil
+	}
+	updated := tx.Model(&models.Movie{}).Where("content_id = ? AND render_generation = ?", after.ContentID, before.RenderGeneration).
+		Updates(map[string]any{"render_dirty": true, "render_generation": gorm.Expr("render_generation + 1")})
+	if updated.Error != nil {
+		return wrapDBErr("invalidate render", fmt.Sprintf("movie %s", after.ContentID), updated.Error)
+	}
+	if updated.RowsAffected != 1 {
+		return fmt.Errorf("invalidate render movie %s: %w", after.ContentID, ErrApplyPublicationStale)
+	}
+	after.RenderDirty = true
+	after.RenderGeneration = before.RenderGeneration + 1
+	return nil
 }
 
 // Upsert inserts or updates a movie and all its associations.
@@ -74,7 +186,15 @@ func (u *MovieUpserter) UpsertWithTranslations(ctx context.Context, movie *model
 			if err != nil {
 				return err
 			}
-			if !existingFound {
+			var beforeRender *models.Movie
+			if existingFound {
+				beforeRender, err = loadPersistedMovieForRenderComparison(tx, movie.ContentID)
+				if err != nil {
+					return wrapDBErr("snapshot render inputs", fmt.Sprintf("movie %s", movie.ContentID), err)
+				}
+			} else {
+				movie.RenderDirty = false
+				movie.RenderGeneration = 0
 				if err := u.insertOrHandleDuplicateTx(tx, movie, &result); err != nil {
 					return err
 				}
@@ -114,7 +234,14 @@ func (u *MovieUpserter) UpsertWithTranslations(ctx context.Context, movie *model
 			if err := tx.Preload("Actresses").Preload("Genres").Preload("Translations", func(db *gorm.DB) *gorm.DB { return db.Order("language ASC") }).First(&loaded, "content_id = ?", movie.ContentID).Error; err != nil {
 				return wrapDBErr("reload", fmt.Sprintf("movie %s", movie.ContentID), err)
 			}
-			loadCreditsIntoTx(tx, &loaded)
+			credits, err := NewMovieCreditRepository(u.repo.GetDB()).ListByMovieTx(tx, loaded.ContentID)
+			if err != nil {
+				return err
+			}
+			loaded.Credits = credits
+			if err := markMovieRenderInputsChangedTx(tx, beforeRender, &loaded); err != nil {
+				return err
+			}
 			result = &loaded
 			return nil
 		})
@@ -124,16 +251,6 @@ func (u *MovieUpserter) UpsertWithTranslations(ctx context.Context, movie *model
 
 // resolveContentID ensures the movie has a ContentID set. If empty, it derives
 // one from the movie ID. Returns an error if neither ContentID nor ID is set.
-
-func loadCreditsIntoTx(tx *gorm.DB, m *models.Movie) {
-	if m == nil {
-		return
-	}
-	var credits []models.MovieCredit
-	if err := tx.Preload("Actress").Where("movie_content_id = ?", m.ContentID).Order("order_index ASC, id ASC").Find(&credits).Error; err == nil {
-		m.Credits = credits
-	}
-}
 
 func (u *MovieUpserter) resolveContentID(_ *gorm.DB, movie *models.Movie) error {
 	if strings.TrimSpace(movie.ContentID) == "" {

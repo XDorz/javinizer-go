@@ -88,7 +88,7 @@ func legacyCastErrorFixture(t *testing.T, suppressed bool) (*DB, *MovieRepositor
 func TestLegacyCastEditReconcileErrors(t *testing.T) {
 	t.Run("upsert lookup", func(t *testing.T) {
 		db, repo, movie, _, _ := legacyCastErrorFixture(t, false)
-		injectDatabaseCallbackError(t, db, "query", "movie_credits", 1)
+		injectDatabaseCallbackError(t, db, "query", "movie_credits", 2)
 		_, err := repo.Upsert(t.Context(), &movie)
 		require.Error(t, err)
 	})

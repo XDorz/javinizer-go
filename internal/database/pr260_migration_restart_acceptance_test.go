@@ -177,7 +177,7 @@ func TestPR260MigrationRestartAcceptance_FileBackedRestoreAndReopen(t *testing.T
 	reopenedSQL, err := reopened.DB.DB()
 	require.NoError(t, err)
 	movieRepo := NewMovieRepository(reopened)
-	verifyReopened := func() {
+	verifyReopened := func(expectedGeneration int64) {
 		found, findErr := movieRepo.FindByID(ctx, movieID)
 		require.NoError(t, findErr)
 		require.Len(t, found.Credits, 3)
@@ -196,13 +196,13 @@ func TestPR260MigrationRestartAcceptance_FileBackedRestoreAndReopen(t *testing.T
 		require.ElementsMatch(t, []uint{targetID, missingBID}, actressIDs)
 		dirty, generation := readGeneration(reopenedSQL)
 		require.True(t, dirty)
-		require.Equal(t, int64(2), generation)
+		require.Equal(t, expectedGeneration, generation)
 		require.NoError(t, reopenedSQL.QueryRowContext(ctx, "SELECT target_actress_id FROM movie_credit_reassignments WHERE movie_content_id = ? AND source_actress_id = ?", movieID, sourceID).Scan(&mappedTarget))
 		require.Equal(t, targetID, mappedTarget)
 		assertProjection(reopenedSQL, []uint{targetID, missingBID})
 		assertForeignKeys(reopenedSQL)
 	}
-	verifyReopened()
+	verifyReopened(2)
 
 	scrape := func() {
 		_, scrapeErr := movieRepo.Upsert(ctx, &models.Movie{
@@ -223,7 +223,7 @@ func TestPR260MigrationRestartAcceptance_FileBackedRestoreAndReopen(t *testing.T
 		require.NoError(t, scrapeErr)
 	}
 	scrape()
-	verifyReopened()
+	verifyReopened(3)
 	scrape()
-	verifyReopened()
+	verifyReopened(3)
 }
