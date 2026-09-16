@@ -133,6 +133,7 @@ func run(cmd *cobra.Command, args []string) error {
 		_, _ = fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 		os.Exit(1)
 	}
+	defer logging.CloseLogger()
 
 	logging.Infof("Starting TUI mode for path: %s", sourcePath)
 

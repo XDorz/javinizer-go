@@ -19,7 +19,7 @@ func TestPR260InstallPathsValidatesBeforePublishing(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, unrelated, []byte("unrelated"), 0o644))
 	stage := &artifactStage{fs: fs, root: stageRoot, finalRoot: finalRoot}
 
-	preserved, err := stage.installPaths([]string{outside}, nil)
+	preserved, err := stage.installPaths([]string{outside}, nil, "", "")
 	require.ErrorContains(t, err, "staged path escapes staging area")
 	require.False(t, preserved)
 	outsideBytes, readErr := afero.ReadFile(fs, outside)
@@ -30,6 +30,32 @@ func TestPR260InstallPathsValidatesBeforePublishing(t *testing.T) {
 	require.Equal(t, "unrelated", string(unrelatedBytes))
 	exists, statErr := afero.Exists(fs, finalRoot)
 	require.NoError(t, statErr)
+	require.False(t, exists)
+}
+
+func TestPR260InstallPathsRelocatesArtifactsToFinalPlannedFolder(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	stageRoot := filepath.Join("stage", "owned")
+	stagedFolder := filepath.Join(stageRoot, "unclamped-title")
+	finalRoot := filepath.Join("library", "movie")
+	finalFolder := filepath.Join(finalRoot, "clamped-title")
+	nfo := filepath.Join(stagedFolder, "movie.nfo")
+	manifest := filepath.Join(stageRoot, "manifest.json")
+	require.NoError(t, fs.MkdirAll(stagedFolder, 0o755))
+	require.NoError(t, afero.WriteFile(fs, nfo, []byte("metadata"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, manifest, []byte("manifest"), 0o644))
+	stage := &artifactStage{fs: fs, root: stageRoot, finalRoot: finalRoot}
+
+	_, err := stage.installPaths([]string{nfo, manifest}, nil, stagedFolder, finalFolder)
+	require.NoError(t, err)
+	published, err := afero.ReadFile(fs, filepath.Join(finalFolder, "movie.nfo"))
+	require.NoError(t, err)
+	require.Equal(t, "metadata", string(published))
+	published, err = afero.ReadFile(fs, filepath.Join(finalRoot, "manifest.json"))
+	require.NoError(t, err)
+	require.Equal(t, "manifest", string(published))
+	exists, err := afero.Exists(fs, filepath.Join(finalRoot, "unclamped-title", "movie.nfo"))
+	require.NoError(t, err)
 	require.False(t, exists)
 }
 
@@ -47,7 +73,7 @@ func TestPR260InstallPathsPublishesAndPreservesLegitimatePaths(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, preserveTarget, []byte("current poster"), 0o644))
 	stage := &artifactStage{fs: fs, root: stageRoot, finalRoot: finalRoot}
 
-	preserved, err := stage.installPaths([]string{publishSource, preserveSource}, []string{preserveSource})
+	preserved, err := stage.installPaths([]string{publishSource, preserveSource}, []string{preserveSource}, "", "")
 	require.NoError(t, err)
 	require.True(t, preserved)
 	published, err := afero.ReadFile(fs, filepath.Join(finalRoot, "movie.nfo"))
@@ -69,7 +95,7 @@ func TestPR260InstallPathsAllowsInPlaceParentMapping(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, source, []byte("subtitle"), 0o644))
 	stage := &artifactStage{fs: fs, root: filepath.Join("stage", "owned"), finalRoot: finalRoot, inPlace: true}
 
-	preserved, err := stage.installPaths([]string{source}, []string{source})
+	preserved, err := stage.installPaths([]string{source}, []string{source}, "", "")
 	require.NoError(t, err)
 	require.True(t, preserved)
 	content, err := afero.ReadFile(fs, source)

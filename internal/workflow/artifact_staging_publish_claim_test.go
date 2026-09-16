@@ -21,6 +21,7 @@ type pr260PublicationFaultOrganizer struct {
 	failExecute   bool
 	noResult      bool
 	missingSource bool
+	emptyFolder   bool
 }
 
 func (o *pr260PublicationFaultOrganizer) PlanOrganize(ctx context.Context, cmd organizer.OrganizeCmd) (*organizer.OrganizePlan, error) {
@@ -43,7 +44,42 @@ func (o *pr260PublicationFaultOrganizer) ExecuteOrganizePlan(p *organizer.Organi
 	if o.noResult {
 		return nil, nil
 	}
-	return o.Organizer.ExecuteOrganizePlan(p, move, link)
+	result, err := o.Organizer.ExecuteOrganizePlan(p, move, link)
+	if result != nil && o.emptyFolder {
+		result.FolderPath = ""
+	}
+	return result, err
+}
+
+func TestPR260PublicationUsesNewPathWhenFinalFolderIsEmpty(t *testing.T) {
+	db, _ := pr260ArtifactDB(t)
+	movie := pr260FencedMovie(t, db, "empty-final-folder", "")
+	fs, root, source, _, _, _, match := pr260FencedFiles(t, "empty-final-folder")
+	dest := filepath.Join(root, "library")
+	real := organizer.NewOrganizer(fs, &organizer.Config{FolderFormat: "movie", FileFormat: "movie", RenameFile: true, OperationMode: operationmode.OperationModeOrganize}, template.NewEngine(), nil)
+	fault := &pr260PublicationFaultOrganizer{Organizer: real, emptyFolder: true}
+	orch := &applyOrchImpl{fs: fs, organizer: fault}
+	cmd := pr260ArtifactFailureCommand(&movie, match, dest)
+	cmd.Organize.Skip = false
+	cmd.Organize.MoveFiles = true
+	cmd.PublicationFence = pr260FencedCounter(t, db)
+	stage, staged, err := orch.prepareArtifact(context.Background(), cmd)
+	require.NoError(t, err)
+	defer stage.cleanup()
+	stagedResult, err := real.Organize(context.Background(), organizer.OrganizeCmd{Match: staged.Match, Movie: staged.Movie, DestDir: staged.DestPath, MoveFiles: true, OperationMode: staged.OperationMode})
+	require.NoError(t, err)
+	nfoPath := filepath.Join(stagedResult.FolderPath, "movie.nfo")
+	require.NoError(t, afero.WriteFile(fs, nfoPath, []byte("metadata"), 0o644))
+	state := &applyPipelineState{organizeResult: stagedResult, nfoPath: nfoPath}
+
+	require.NoError(t, stage.publish(context.Background(), orch, state, nil))
+	require.Empty(t, state.organizeResult.FolderPath)
+	finalDir := filepath.Dir(state.organizeResult.NewPath)
+	require.Equal(t, filepath.Join(finalDir, "movie.nfo"), state.nfoPath)
+	require.FileExists(t, state.organizeResult.NewPath)
+	require.FileExists(t, state.nfoPath)
+	_, err = fs.Stat(source)
+	require.Error(t, err)
 }
 
 func TestPR260PublicationClaimPlanAndExecutionFaults(t *testing.T) {

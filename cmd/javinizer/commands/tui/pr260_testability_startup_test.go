@@ -25,7 +25,8 @@ func TestPR260TUICommandStartsAndQuitsWithIsolatedIO(t *testing.T) {
 	cfg, err := config.LoadOrCreate(configPath)
 	require.NoError(t, err)
 	cfg.Database.DSN = filepath.Join(dir, "javinizer.db")
-	cfg.Logging.Output = filepath.Join(dir, "tui.log")
+	logPath := filepath.Join(dir, "tui.log")
+	cfg.Logging.Output = logPath
 	require.NoError(t, config.Save(cfg, configPath))
 	input, writer := io.Pipe()
 	defer input.Close()
@@ -58,6 +59,7 @@ func TestPR260TUICommandStartsAndQuitsWithIsolatedIO(t *testing.T) {
 	require.NoError(t, err, "TUI must terminate via q, not the deadline: %v", ctx.Err())
 	require.NoError(t, ctx.Err())
 	<-quitSent
+	require.NoError(t, os.Remove(logPath))
 	require.FileExists(t, cfg.Database.DSN)
 	require.FileExists(t, configPath)
 	db, err := database.New(&database.Config{Type: "sqlite", DSN: cfg.Database.DSN, LogLevel: "silent"})
@@ -75,7 +77,8 @@ func TestPR260TUICommandCancellationIsBounded(t *testing.T) {
 	cfg, err := config.LoadOrCreate(configPath)
 	require.NoError(t, err)
 	cfg.Database.DSN = filepath.Join(dir, "javinizer.db")
-	cfg.Logging.Output = filepath.Join(dir, "tui.log")
+	logPath := filepath.Join(dir, "tui.log")
+	cfg.Logging.Output = logPath
 	require.NoError(t, config.Save(cfg, configPath))
 	input, writer := io.Pipe()
 	defer input.Close()
@@ -93,4 +96,5 @@ func TestPR260TUICommandCancellationIsBounded(t *testing.T) {
 	err = root.Execute()
 	require.Error(t, err)
 	require.True(t, errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled), "%v", err)
+	require.NoError(t, os.Remove(logPath))
 }

@@ -419,7 +419,16 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 	if s.inPlace {
 		artifactSkipDir = ""
 	}
-	preservedMedia, err := s.installTree(stagedVideo, artifactSkipDir, state.downloadPaths)
+	stagedArtifactDir := ""
+	finalArtifactDir := ""
+	if finalResult != nil && !s.inPlace {
+		stagedArtifactDir = filepath.Dir(stagedVideo)
+		finalArtifactDir = finalResult.FolderPath
+		if finalArtifactDir == "" {
+			finalArtifactDir = filepath.Dir(finalResult.NewPath)
+		}
+	}
+	preservedMedia, err := s.installTree(stagedVideo, artifactSkipDir, state.downloadPaths, stagedArtifactDir, finalArtifactDir)
 	if err != nil {
 		return err
 	}
@@ -481,14 +490,14 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		state.targetDir = s.finalRoot
 	}
 	if state.nfoPath != "" {
-		mapped, err := s.finalPath(state.nfoPath)
+		mapped, err := s.publicationPath(state.nfoPath, stagedArtifactDir, finalArtifactDir)
 		if err != nil {
 			return err
 		}
 		state.nfoPath = mapped
 	}
 	for i, path := range state.downloadPaths {
-		mapped, err := s.finalPath(path)
+		mapped, err := s.publicationPath(path, stagedArtifactDir, finalArtifactDir)
 		if err != nil {
 			return err
 		}
@@ -548,7 +557,7 @@ func stagedArtifactSiblingName(sourceName, targetName, siblingName string) strin
 	return siblingName
 }
 
-func (s *artifactStage) installTree(skipFile, skipDir string, preserve []string) (bool, error) {
+func (s *artifactStage) installTree(skipFile, skipDir string, preserve []string, stagedArtifactDir, finalArtifactDir string) (bool, error) {
 	if s.inPlace {
 		if _, err := s.fs.Stat(s.root); os.IsNotExist(err) {
 			return false, nil
@@ -580,13 +589,13 @@ func (s *artifactStage) installTree(skipFile, skipDir string, preserve []string)
 		return false, fmt.Errorf("walk staged artifacts: %w", err)
 	}
 	sort.Strings(paths)
-	return s.installPaths(paths, preserve)
+	return s.installPaths(paths, preserve, stagedArtifactDir, finalArtifactDir)
 }
 
-func (s *artifactStage) installPaths(paths, preserve []string) (bool, error) {
+func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir, finalArtifactDir string) (bool, error) {
 	preserved := false
 	for _, source := range paths {
-		target, err := s.finalPath(source)
+		target, err := s.publicationPath(source, stagedArtifactDir, finalArtifactDir)
 		if err != nil {
 			return false, err
 		}
@@ -614,6 +623,21 @@ func (s *artifactStage) installPaths(paths, preserve []string) (bool, error) {
 		}
 	}
 	return preserved, nil
+}
+
+func (s *artifactStage) publicationPath(path, stagedArtifactDir, finalArtifactDir string) (string, error) {
+	target, err := s.finalPath(path)
+	if err != nil {
+		return "", err
+	}
+	if stagedArtifactDir == "" || finalArtifactDir == "" {
+		return target, nil
+	}
+	rel, _ := filepath.Rel(stagedArtifactDir, path)
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return target, nil
+	}
+	return filepath.Join(finalArtifactDir, rel), nil
 }
 
 func containsPath(paths []string, path string) bool {
