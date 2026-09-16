@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +15,21 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
+
+type readinessWriter struct {
+	destination io.Writer
+	ready       chan struct{}
+	once        sync.Once
+}
+
+func newReadinessWriter(destination io.Writer) *readinessWriter {
+	return &readinessWriter{destination: destination, ready: make(chan struct{})}
+}
+
+func (w *readinessWriter) Write(p []byte) (int, error) {
+	w.once.Do(func() { close(w.ready) })
+	return w.destination.Write(p)
+}
 
 // Execute the registered command, not just a model constructor: the configured
 // repositories, sort factory and event subscriber are built before Bubble Tea runs.
@@ -31,32 +47,36 @@ func TestPR260TUICommandStartsAndQuitsWithIsolatedIO(t *testing.T) {
 	input, writer := io.Pipe()
 	defer input.Close()
 	defer writer.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	// This command performs real config, database, and repository bootstrap before
+	// Bubble Tea starts. Keep the whole operation bounded, while allowing loaded CI
+	// runners enough time to reach the observable first render.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	startedAt := time.Now()
 	root := &cobra.Command{Use: "javinizer"}
 	root.PersistentFlags().String("config", configPath, "isolated config")
 	cmd := NewCommand()
 	root.AddCommand(cmd)
 	root.SetContext(ctx)
 	cmd.SetIn(input)
-	cmd.SetOut(io.Discard)
+	output := newReadinessWriter(io.Discard)
+	cmd.SetOut(output)
 	cmd.SetErr(io.Discard)
 	root.SetArgs([]string{"tui", source})
 	quitSent := make(chan struct{})
 	go func() {
 		defer close(quitSent)
-		// The keyboard reader must remain open until Bubble Tea has initialized.
-		timer := time.NewTimer(250 * time.Millisecond)
-		defer timer.Stop()
+		// Send q only after Bubble Tea has rendered, rather than guessing how long
+		// real command bootstrap will take on a loaded runner.
 		select {
-		case <-timer.C:
+		case <-output.ready:
 		case <-ctx.Done():
 			return
 		}
 		_, _ = writer.Write([]byte("q"))
 	}()
 	err = root.Execute()
-	require.NoError(t, err, "TUI must terminate via q, not the deadline: %v", ctx.Err())
+	require.NoError(t, err, "TUI must render and terminate via q, not the deadline (elapsed %s, context: %v)", time.Since(startedAt), ctx.Err())
 	require.NoError(t, ctx.Err())
 	<-quitSent
 	require.NoError(t, os.Remove(logPath))
