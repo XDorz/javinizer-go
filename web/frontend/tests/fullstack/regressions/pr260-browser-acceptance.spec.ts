@@ -12,6 +12,32 @@ import {
 	soleResult,
 } from '../helpers';
 
+type ActressRestore = {
+	id: number;
+	payload: {
+		dmm_id: number;
+		first_name: string;
+		last_name: string;
+		japanese_name: string;
+		thumb_url: string;
+		aliases: string;
+	};
+};
+
+let actressRestore: ActressRestore | undefined;
+
+test.afterEach(async ({ request }: { request: APIRequestContext }) => {
+	if (!actressRestore) return;
+	await loginAgainstRealBackend(request);
+	const restore = actressRestore;
+	actressRestore = undefined;
+	const response = await request.put(BACKEND_BASE + '/api/v1/actresses/' + restore.id, {
+		data: restore.payload,
+		failOnStatusCode: false,
+	});
+	expect(response.status(), await response.text()).toBe(200);
+});
+
 test('PR260 browser resolve then save and reload preserves canonical cast', async ({
 	page,
 	request,
@@ -35,7 +61,30 @@ test('PR260 browser resolve then save and reload preserves canonical cast', asyn
 	const existingIdentities = await existingIdentitiesResponse.json();
 	const existingTarget = existingIdentities.actresses.find(
 		(actress: { dmm_id: number }) => actress.dmm_id === 1,
-	);
+	) as
+		| {
+				id: number;
+				dmm_id: number;
+				first_name?: string;
+				last_name?: string;
+				japanese_name?: string;
+				thumb_url?: string;
+				aliases?: string;
+		  }
+		| undefined;
+	if (existingTarget) {
+		actressRestore = {
+			id: existingTarget.id,
+			payload: {
+				dmm_id: existingTarget.dmm_id,
+				first_name: existingTarget.first_name ?? '',
+				last_name: existingTarget.last_name ?? '',
+				japanese_name: existingTarget.japanese_name ?? '',
+				thumb_url: existingTarget.thumb_url ?? '',
+				aliases: existingTarget.aliases ?? '',
+			},
+		};
+	}
 	const identityPayload = {
 		dmm_id: 1,
 		first_name: `PR260${runTag}`,
@@ -55,6 +104,19 @@ test('PR260 browser resolve then save and reload preserves canonical cast', asyn
 		existingTarget ? 200 : 201,
 	);
 	const target = await canonicalResponse.json();
+	if (!actressRestore) {
+		actressRestore = {
+			id: target.id,
+			payload: {
+				dmm_id: 1,
+				first_name: 'Test',
+				last_name: 'Actor',
+				japanese_name: '',
+				thumb_url: '',
+				aliases: '',
+			},
+		};
+	}
 	expect(target.verified, 'fixture target must be verified').toBe(true);
 	expect(target.id, 'fixture target must have an id').toBeGreaterThan(0);
 
