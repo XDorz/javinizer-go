@@ -344,7 +344,7 @@ func (m *actressMerger) PlanMerge(ctx context.Context, targetID, sourceID uint, 
 		sourceCandidates,
 		canonicalName,
 	)
-	sourceAliasUpserts := sourceAliasesForUpsert(sourceCandidates, canonicalName)
+	sourceAliasUpserts := sourceAliasesForUpsert(splitAliasList(preview.Source.Aliases), canonicalName)
 
 	return &MergePlan{
 		TargetID:              targetID,
@@ -414,6 +414,9 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 				return ErrActressMergeUniqueConstraint
 			}
 			return wrapDBErr("update", fmt.Sprintf("merge actress %d", targetID), err)
+		}
+		if err := transitionActressCanonicalNamesTx(tx, targetID, source); err != nil {
+			return wrapDBErr("merge", fmt.Sprintf("stored aliases from actress %d", sourceID), err)
 		}
 
 		var moveErr error

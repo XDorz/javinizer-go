@@ -474,7 +474,9 @@ func canonicalActressRepresentations(actress *models.Actress) []string {
 	if actress == nil {
 		return nil
 	}
-	return collectActressAliasCandidates(actress)
+	canonical := *actress
+	canonical.Aliases = ""
+	return collectActressAliasCandidates(&canonical)
 }
 
 func transitionActressCanonicalNamesTx(tx *gorm.DB, actressID uint, previous *models.Actress) error {

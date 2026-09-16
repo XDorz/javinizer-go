@@ -99,11 +99,20 @@ func (r *ActressRepository) FindByID(ctx context.Context, id uint) (*models.Actr
 // Delete removes the actress with the given primary key.
 func (r *ActressRepository) Delete(ctx context.Context, id uint) error {
 	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(
+			"UPDATE movies SET render_dirty = 1, render_generation = render_generation + 1, updated_at = CURRENT_TIMESTAMP WHERE content_id IN (SELECT movie_content_id FROM movie_credits WHERE actress_id = ?)",
+			id,
+		).Error; err != nil {
+			return wrapDBErr("mark dirty", fmt.Sprintf("movies for actress %d", id), err)
+		}
 		if err := deleteCreditReassignmentsTx(tx, "source_actress_id = ? OR target_actress_id = ?", fmt.Sprintf("actress %d", id), id, id); err != nil {
 			return err
 		}
 		if err := deleteCreditRecordsTx(tx, "credit_id IN (SELECT id FROM movie_credits WHERE actress_id = ?)", "actress_id = ?", id, fmt.Sprintf("actress %d", id)); err != nil {
 			return err
+		}
+		if err := tx.Exec("DELETE FROM movie_actresses WHERE actress_id = ?", id).Error; err != nil {
+			return wrapDBErr("delete", fmt.Sprintf("legacy actress associations for %d", id), err)
 		}
 		if err := tx.Delete(&models.Actress{}, id).Error; err != nil {
 			return wrapDBErr("delete", fmt.Sprintf("actress %d", id), err)
@@ -453,20 +462,11 @@ func promoteCandidateTx(tx *gorm.DB, id uint, firstName, lastName, japaneseName,
 	if err := tx.First(&candidate, id).Error; err != nil {
 		return wrapDBErr("promote", fmt.Sprintf("candidate %d", id), err)
 	}
-	previousName := canonicalActressName(&candidate)
-	promotedName := canonicalActressName(&models.Actress{
-		FirstName:    firstName,
-		LastName:     lastName,
-		JapaneseName: japaneseName,
-	})
-
 	if err := tx.Model(&models.Actress{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 		return wrapDBErr("promote", fmt.Sprintf("candidate %d", id), err)
 	}
-	if previousName != "" && !strings.EqualFold(previousName, promotedName) {
-		if err := upsertActressAliases(tx, collectActressAliasCandidates(&candidate), promotedName); err != nil {
-			return wrapDBErr("promote", fmt.Sprintf("aliases for candidate %d", id), err)
-		}
+	if err := transitionActressCanonicalNamesTx(tx, id, &candidate); err != nil {
+		return wrapDBErr("promote", fmt.Sprintf("aliases for candidate %d", id), err)
 	}
 	if err := resolveCandidateIdentityCollisionsTx(tx, id); err != nil {
 		return err
