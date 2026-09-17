@@ -249,7 +249,7 @@ func upsertActressAliases(tx *gorm.DB, aliases []string, canonicalName string) e
 			AliasName:     alias,
 			CanonicalName: canonicalName,
 		}
-		if err := updateNormalizedActressAliasesTx(tx, &entry); err != nil {
+		if err := claimNormalizedActressAliasTx(tx, &entry); err != nil {
 			return err
 		}
 	}
@@ -361,7 +361,6 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 	targetID := plan.TargetID
 	sourceID := plan.SourceID
 	merged := plan.Merged
-	oldCanonicalName := plan.OriginalCanonicalName
 
 	updatedMovies := 0
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -433,10 +432,6 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 		updatedMovies, moveErr = moveMovieAssociations(tx, sourceID, targetID)
 		if moveErr != nil {
 			return wrapDBErr("merge", fmt.Sprintf("actress movie associations from %d to %d", sourceID, targetID), moveErr)
-		}
-
-		if err := retargetActressAliasesTx(tx, targetID, oldCanonicalName); err != nil {
-			return err
 		}
 
 		if err := moveCredits(tx, sourceID, targetID); err != nil {

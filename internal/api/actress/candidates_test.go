@@ -227,3 +227,40 @@ func TestListCollisionsResolutionPolicyFailures(t *testing.T) {
 		require.Contains(t, response.Body.String(), "load collision credit 999")
 	})
 }
+
+func TestResolveCollisionAdoptAliasOwnershipConflictReturns409(t *testing.T) {
+	db, err := database.New(&database.Config{Type: "sqlite", DSN: ":memory:", LogLevel: "silent"})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	require.NoError(t, db.RunMigrationsOnStartup(t.Context()))
+	repos := db.Repositories()
+	ownerA := models.Actress{JapaneseName: "Owner A", Verified: true, Origin: database.ActressOriginUser}
+	ownerB := models.Actress{JapaneseName: "Owner B", Verified: true, Origin: database.ActressOriginUser}
+	require.NoError(t, db.Create(&ownerA).Error)
+	require.NoError(t, db.Create(&ownerB).Error)
+	require.NoError(t, repos.ActressAliasRepo.Create(t.Context(), &models.ActressAlias{AliasName: "Stage Name", CanonicalName: ownerA.JapaneseName}))
+	movie := models.Movie{ContentID: "alias-owner-conflict", ID: "alias-owner-conflict", RenderGeneration: 9}
+	require.NoError(t, db.Create(&movie).Error)
+	credit := models.MovieCredit{MovieContentID: movie.ContentID, ActressID: ownerB.ID, CreditedName: "Ｓｔａｇｅ　Ｎａｍｅ"}
+	require.NoError(t, db.Create(&credit).Error)
+	collision := models.CreditCollision{CreditID: credit.ID, MovieContentID: movie.ContentID, Field: models.CreditFieldCreditedName, ReportedValue: credit.CreditedName, CanonicalValue: ownerB.JapaneseName, Status: models.CollisionStatusOpen}
+	require.NoError(t, db.Create(&collision).Error)
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/"), NewActressDeps(repos.ContentRepos, repos.TranslationRepos))
+	body, err := json.Marshal(map[string]string{"resolution": models.CollisionResolutionAdoptAlias})
+	require.NoError(t, err)
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/actresses/collisions/"+itoa(collision.ID)+"/resolve", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(response, request)
+	require.Equal(t, http.StatusConflict, response.Code, response.Body.String())
+
+	found, err := repos.ActressAliasRepo.FindByAliasName(t.Context(), "stage name")
+	require.NoError(t, err)
+	require.Equal(t, ownerA.JapaneseName, found.CanonicalName)
+	require.NoError(t, db.First(&collision, collision.ID).Error)
+	require.Equal(t, models.CollisionStatusOpen, collision.Status)
+	require.NoError(t, db.First(&movie, "content_id = ?", movie.ContentID).Error)
+	require.EqualValues(t, 9, movie.RenderGeneration)
+}

@@ -23,7 +23,12 @@ type ActressAliasRepository struct {
 // ErrActressAliasAmbiguous means one normalized alias key points at different
 // canonical owners. Legacy databases may contain these rows because alias_name
 // was historically unique only in its raw form; callers must not choose one.
-var ErrActressAliasAmbiguous = errors.New("normalized actress alias has conflicting canonical owners")
+var (
+	ErrActressAliasAmbiguous = errors.New("normalized actress alias has conflicting canonical owners")
+	// ErrActressAliasOwnershipConflict means an ordinary alias claim attempted
+	// to replace a normalized key already owned by another identity.
+	ErrActressAliasOwnershipConflict = errors.New("normalized actress alias is owned by another canonical identity")
+)
 
 func validateNormalizedAliasRows(aliases []models.ActressAlias) error {
 	owners := make(map[string]string, len(aliases))
@@ -76,7 +81,11 @@ func normalizedAliasesForCanonicalTx(tx *gorm.DB, canonicalName string) ([]model
 	return aliases, nil
 }
 
-func retargetNormalizedCanonicalAliasesTx(tx *gorm.DB, oldCanonicalName, newCanonicalName string) error {
+func retargetProvenCanonicalAliasesTx(tx *gorm.DB, oldCanonicalName, newCanonicalName string, provenOwnerKeys map[string]struct{}) error {
+	oldKey := models.NormalizeActressNameKey(oldCanonicalName)
+	if _, proven := provenOwnerKeys[oldKey]; oldKey == "" || !proven {
+		return fmt.Errorf("retarget actress aliases from %q: %w", oldCanonicalName, ErrActressAliasOwnershipConflict)
+	}
 	aliases, err := normalizedAliasesForCanonicalTx(tx, oldCanonicalName)
 	if err != nil {
 		return err
@@ -95,10 +104,16 @@ func retargetNormalizedCanonicalAliasesTx(tx *gorm.DB, oldCanonicalName, newCano
 	}).Error
 }
 
-func updateNormalizedActressAliasesTx(tx *gorm.DB, alias *models.ActressAlias) error {
+// claimNormalizedActressAliasTx is the ordinary create/accept mode. Existing
+// ownership is immutable: equivalent same-owner claims are idempotent, while a
+// different owner fails so the caller transaction can roll back.
+func claimNormalizedActressAliasTx(tx *gorm.DB, alias *models.ActressAlias) error {
 	existing, err := normalizedActressAliasesTx(tx, alias.AliasName)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		if err := tx.Create(alias).Error; err != nil {
+			if isLocked(err) {
+				return fmt.Errorf("claim actress alias %q encountered a concurrent owner: %w", alias.AliasName, ErrActressAliasOwnershipConflict)
+			}
 			return wrapDBErr("create", fmt.Sprintf("actress alias %s", alias.AliasName), err)
 		}
 		return nil
@@ -106,26 +121,19 @@ func updateNormalizedActressAliasesTx(tx *gorm.DB, alias *models.ActressAlias) e
 	if err != nil {
 		return wrapDBErr("find", fmt.Sprintf("actress alias %s", alias.AliasName), err)
 	}
+	existingOwner := existing[0].CanonicalName
+	if models.NormalizeActressNameKey(existingOwner) != models.NormalizeActressNameKey(alias.CanonicalName) {
+		return fmt.Errorf("claim actress alias %q for %q (currently owned by %q): %w", alias.AliasName, alias.CanonicalName, existingOwner, ErrActressAliasOwnershipConflict)
+	}
 	alias.ID = existing[0].ID
 	alias.CreatedAt = existing[0].CreatedAt
-	ids := make([]uint, len(existing))
-	for i := range existing {
-		ids[i] = existing[i].ID
-	}
-	if err := tx.Model(&models.ActressAlias{}).Where("id IN ?", ids).Updates(map[string]interface{}{
-		colCanonicalName:     alias.CanonicalName,
-		"canonical_name_key": models.NormalizeActressNameKey(alias.CanonicalName),
-		colUpdatedAt:         time.Now().UTC(),
-	}).Error; err != nil {
-		return wrapDBErr("update", fmt.Sprintf("actress alias %s", alias.AliasName), err)
-	}
 	return nil
 }
 
 func backfillActressAliasNameKeys(ctx context.Context, db *gorm.DB) error {
 	var aliases []models.ActressAlias
-	if err := db.WithContext(ctx).Where("alias_name_key = ? OR canonical_name_key = ?", "", "").Find(&aliases).Error; err != nil {
-		return wrapDBErr("list", "actress aliases missing normalized keys", err)
+	if err := db.WithContext(ctx).Order("id").Find(&aliases).Error; err != nil {
+		return wrapDBErr("list", "actress aliases for normalized-key backfill", err)
 	}
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for i := range aliases {
@@ -133,8 +141,48 @@ func backfillActressAliasNameKeys(ctx context.Context, db *gorm.DB) error {
 				"alias_name_key":     models.NormalizeActressNameKey(aliases[i].AliasName),
 				"canonical_name_key": models.NormalizeActressNameKey(aliases[i].CanonicalName),
 			}
-			if err := tx.Model(&models.ActressAlias{}).Where("id = ?", aliases[i].ID).Updates(updates).Error; err != nil {
+			if err := tx.Model(&models.ActressAlias{}).Where("id = ?", aliases[i].ID).UpdateColumns(updates).Error; err != nil {
 				return wrapDBErr("backfill", fmt.Sprintf("actress alias %d normalized keys", aliases[i].ID), err)
+			}
+		}
+		return nil
+	})
+}
+
+// backfillActressCandidateNameKeys upgrades persisted candidate keys after a
+// normalization algorithm change. Equivalent legacy candidates are preserved,
+// quarantined, and left keyless so lookup can detect and reject the ambiguity.
+func backfillActressCandidateNameKeys(ctx context.Context, db *gorm.DB) error {
+	var candidates []models.Actress
+	if err := db.WithContext(ctx).Where("verified = ? AND name_key IS NOT NULL AND name_key <> ?", false, "").Order("id").Find(&candidates).Error; err != nil {
+		return wrapDBErr("list", "actress candidates for normalized-key backfill", err)
+	}
+	groups := make(map[string][]uint)
+	for i := range candidates {
+		key := actressNameKey(&candidates[i])
+		if key != "" {
+			groups[key] = append(groups[key], candidates[i].ID)
+		}
+	}
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if len(candidates) > 0 {
+			ids := make([]uint, len(candidates))
+			for i := range candidates {
+				ids[i] = candidates[i].ID
+			}
+			if err := tx.Model(&models.Actress{}).Where("id IN ?", ids).UpdateColumn("name_key", nil).Error; err != nil {
+				return wrapDBErr("clear", "legacy actress candidate normalized keys", err)
+			}
+		}
+		for key, ids := range groups {
+			if len(ids) == 1 {
+				if err := tx.Model(&models.Actress{}).Where("id = ?", ids[0]).UpdateColumn("name_key", key).Error; err != nil {
+					return wrapDBErr("backfill", fmt.Sprintf("actress candidate %d normalized key", ids[0]), err)
+				}
+				continue
+			}
+			if err := tx.Model(&models.Actress{}).Where("id IN ?", ids).UpdateColumn(colAmbiguityQuarantined, true).Error; err != nil {
+				return wrapDBErr("quarantine", fmt.Sprintf("%d equivalent actress candidates for key %q", len(ids), key), err)
 			}
 		}
 		return nil
@@ -153,26 +201,10 @@ func NewActressAliasRepository(db *DB) *ActressAliasRepository {
 	}
 }
 
-// Create inserts a new actress alias record without stealing a normalized key
-// already owned by another canonical identity.
+// Create claims a normalized alias without replacing another owner.
 func (r *ActressAliasRepository) Create(ctx context.Context, alias *models.ActressAlias) error {
 	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		existing, err := normalizedActressAliasesTx(tx, alias.AliasName)
-		if err == nil {
-			if models.NormalizeActressNameKey(existing[0].CanonicalName) != models.NormalizeActressNameKey(alias.CanonicalName) {
-				return fmt.Errorf("create actress alias %s: %w", alias.AliasName, ErrActressAliasAmbiguous)
-			}
-			alias.ID = existing[0].ID
-			alias.CreatedAt = existing[0].CreatedAt
-			return nil
-		}
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return wrapDBErr("find", fmt.Sprintf("actress alias %s", alias.AliasName), err)
-		}
-		if err := tx.Create(alias).Error; err != nil {
-			return wrapDBErr("create", fmt.Sprintf("actress alias %s", alias.AliasName), err)
-		}
-		return nil
+		return claimNormalizedActressAliasTx(tx, alias)
 	})
 }
 
@@ -180,13 +212,13 @@ func (r *ActressAliasRepository) Create(ctx context.Context, alias *models.Actre
 // keyed by alias name.
 func (r *ActressAliasRepository) Upsert(ctx context.Context, alias *models.ActressAlias) error {
 	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return updateNormalizedActressAliasesTx(tx, alias)
+		return claimNormalizedActressAliasTx(tx, alias)
 	})
 }
 
 // UpsertTx upserts an alias within the given transaction.
 func (r *ActressAliasRepository) UpsertTx(tx *gorm.DB, alias *models.ActressAlias) error {
-	return updateNormalizedActressAliasesTx(tx, alias)
+	return claimNormalizedActressAliasTx(tx, alias)
 }
 
 // FindByAliasName loads the alias record with the given normalized alias name.

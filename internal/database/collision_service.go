@@ -613,7 +613,7 @@ func transitionActressCanonicalNamesTx(tx *gorm.DB, actressID uint, previous *mo
 		if _, unchanged := currentKeys[key]; unchanged {
 			continue
 		}
-		if err := retargetNormalizedCanonicalAliasesTx(tx, oldName, newCanonical); err != nil {
+		if err := retargetProvenCanonicalAliasesTx(tx, oldName, newCanonical, previousKeys); err != nil {
 			return wrapDBErr("retarget", fmt.Sprintf("actress aliases for %d", actressID), err)
 		}
 		existing, err := normalizedActressAliasesTx(tx, oldName)
@@ -625,36 +625,32 @@ func transitionActressCanonicalNamesTx(tx *gorm.DB, actressID uint, previous *mo
 		case err != nil:
 			return wrapDBErr("find", fmt.Sprintf("actress alias %s", oldName), err)
 		default:
-			if _, owned := previousKeys[models.NormalizeActressNameKey(existing[0].CanonicalName)]; owned {
-				if err := updateNormalizedActressAliasesTx(tx, &models.ActressAlias{AliasName: oldName, CanonicalName: newCanonical}); err != nil {
-					return err
-				}
+			ownerKey := models.NormalizeActressNameKey(existing[0].CanonicalName)
+			if ownerKey == models.NormalizeActressNameKey(newCanonical) {
+				continue
+			}
+			if _, owned := previousKeys[ownerKey]; !owned {
+				// This spelling belongs to an unrelated identity. A merge may
+				// retarget only aliases whose old owner is represented by the
+				// source snapshot loaded in this transaction.
+				continue
+			}
+			ids := make([]uint, len(existing))
+			for i := range existing {
+				ids[i] = existing[i].ID
+			}
+			if err := tx.Model(&models.ActressAlias{}).Where("id IN ?", ids).Updates(map[string]interface{}{
+				colCanonicalName: newCanonical, "canonical_name_key": models.NormalizeActressNameKey(newCanonical), colUpdatedAt: time.Now().UTC(),
+			}).Error; err != nil {
+				return wrapDBErr("retarget", fmt.Sprintf("actress alias %s", oldName), err)
 			}
 		}
 	}
 	return nil
 }
 
-func retargetActressAliasesTx(tx *gorm.DB, actressID uint, oldCanonicalName string) error {
-	if strings.TrimSpace(oldCanonicalName) == "" {
-		return nil
-	}
-	var actress models.Actress
-	if err := tx.First(&actress, actressID).Error; err != nil {
-		return wrapDBErr("load", fmt.Sprintf("actress %d", actressID), err)
-	}
-	newCanonicalName := canonicalActressName(&actress)
-	if strings.TrimSpace(newCanonicalName) == "" || oldCanonicalName == newCanonicalName {
-		return nil
-	}
-	if err := retargetNormalizedCanonicalAliasesTx(tx, oldCanonicalName, newCanonicalName); err != nil {
-		return wrapDBErr("retarget", fmt.Sprintf("actress aliases for %d", actressID), err)
-	}
-	return nil
-}
-
 func upsertAliasTx(tx *gorm.DB, alias *models.ActressAlias) error {
-	return updateNormalizedActressAliasesTx(tx, alias)
+	return claimNormalizedActressAliasTx(tx, alias)
 }
 
 func reassignLegacyActressTx(tx *gorm.DB, movieContentID string, sourceActressID, targetActressID uint, suppressed bool) error {

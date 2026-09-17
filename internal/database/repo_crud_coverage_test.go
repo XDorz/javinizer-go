@@ -71,12 +71,13 @@ func TestRepoCRUD_ActressAlias_Upsert_UpdatePath(t *testing.T) {
 		AliasName:     "Upsert-Update",
 		CanonicalName: "Updated",
 	}
-	require.NoError(t, repo.Upsert(context.Background(), updated))
-	assert.Equal(t, originalID, updated.ID, "upsert should preserve existing ID")
+	require.ErrorIs(t, repo.Upsert(context.Background(), updated), ErrActressAliasOwnershipConflict)
+	assert.Zero(t, updated.ID)
+	assert.NotZero(t, originalID)
 
 	found, err := repo.FindByAliasName(context.Background(), "Upsert-Update")
 	require.NoError(t, err)
-	assert.Equal(t, "Updated", found.CanonicalName)
+	assert.Equal(t, "Original", found.CanonicalName)
 }
 
 func TestRepoCRUD_ActressAlias_FindByCanonicalName(t *testing.T) {

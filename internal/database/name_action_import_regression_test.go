@@ -29,7 +29,8 @@ func TestMovieUpsertCanonicalCreditedNameRepresentationsGateOnlyMismatch(t *test
 		{name: "empty", actress: models.Actress{DMMID: 8105, FirstName: "Yui", LastName: "Hatano"}},
 		{name: "normalized whitespace and case", actress: models.Actress{DMMID: 8106, FirstName: "Yui", LastName: "Hatano"}, creditedName: "  yUi   hAtAnO  "},
 		{name: "normalized persisted alias", actress: models.Actress{DMMID: 8107, FirstName: "Yui", LastName: "Hatano"}, creditedName: "  stage   NAME  ", acceptedAlias: "Stage Name"},
-		{name: "normalized unicode alias", actress: models.Actress{DMMID: 8108, JapaneseName: "正規名"}, creditedName: "  ＳＴＡＧＥ　ＮＡＭＥ  ", acceptedAlias: "ｓｔａｇｅ　ｎａｍｅ"},
+		{name: "normalized width alias", actress: models.Actress{DMMID: 8108, JapaneseName: "正規名"}, creditedName: "  ＳＴＡＧＥ　ＮＡＭＥ  ", acceptedAlias: "stage name"},
+		{name: "normalized composition alias", actress: models.Actress{DMMID: 8112, JapaneseName: "正規名"}, creditedName: "か\u3099", acceptedAlias: "が"},
 		{name: "alias owned by another identity", actress: models.Actress{DMMID: 8109, FirstName: "Yui", LastName: "Hatano"}, creditedName: "  shared   name ", acceptedAlias: "Shared Name", aliasCanonical: "Other Person", wantOpen: true},
 		{name: "inline alias is not catalog truth", actress: models.Actress{DMMID: 8110, FirstName: "Yui", LastName: "Hatano"}, creditedName: "Stage Name", inlineAlias: "Stage Name", wantOpen: true},
 		{name: "true mismatch", actress: models.Actress{DMMID: 8111, FirstName: "Yui", LastName: "Hatano"}, creditedName: "Someone Else", wantOpen: true},
@@ -369,15 +370,6 @@ func TestNormalizedAliasLookupFailureContracts(t *testing.T) {
 		require.Empty(t, key)
 	})
 
-	t.Run("upsert wraps update failure", func(t *testing.T) {
-		db := newCreditTestDB(t)
-		repo := NewActressAliasRepository(db)
-		require.NoError(t, repo.Create(t.Context(), &models.ActressAlias{AliasName: "Update Alias", CanonicalName: "Before"}))
-		require.NoError(t, db.Exec("CREATE TRIGGER fail_alias_update BEFORE UPDATE ON actress_aliases BEGIN SELECT RAISE(ABORT, 'injected alias update failure'); END").Error)
-		err := repo.Upsert(t.Context(), &models.ActressAlias{AliasName: " update alias ", CanonicalName: "After"})
-		require.ErrorContains(t, err, "update actress alias")
-	})
-
 	t.Run("startup reports backfill failure", func(t *testing.T) {
 		db, err := New(&Config{Type: "sqlite", DSN: ":memory:", LogLevel: "silent"})
 		require.NoError(t, err)
@@ -436,12 +428,6 @@ func TestNormalizedAliasConflictingOwnersFailClosedWithoutMutation(t *testing.T)
 	actress := models.Actress{DMMID: 91991, JapaneseName: "New Owner", Verified: true}
 	require.NoError(t, db.Create(&actress).Error)
 	err = db.Transaction(func(tx *gorm.DB) error {
-		return retargetActressAliasesTx(tx, actress.ID, "Owner A")
-	})
-	require.ErrorIs(t, err, ErrActressAliasAmbiguous)
-	assertUnchanged(t)
-
-	err = db.Transaction(func(tx *gorm.DB) error {
 		return transitionActressCanonicalNamesTx(tx, actress.ID, &models.Actress{JapaneseName: "Owner A"})
 	})
 	require.ErrorIs(t, err, ErrActressAliasAmbiguous)
@@ -473,11 +459,11 @@ func TestNormalizedAliasEquivalentOwnersRetargetTogether(t *testing.T) {
 	actress := models.Actress{DMMID: 91992, JapaneseName: "Owner B", Verified: true}
 	require.NoError(t, db.Create(&actress).Error)
 	require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
-		return retargetActressAliasesTx(tx, actress.ID, "owner a")
+		return transitionActressCanonicalNamesTx(tx, actress.ID, &models.Actress{JapaneseName: "owner a"})
 	}))
 	var stored []models.ActressAlias
 	require.NoError(t, db.Order("id").Find(&stored).Error)
-	require.Len(t, stored, 3)
+	require.Len(t, stored, 4)
 	for i := range stored {
 		require.Equal(t, "Owner B", stored[i].CanonicalName)
 	}
@@ -535,7 +521,7 @@ func TestNormalizedAliasRepositoryFailureAndNoopContracts(t *testing.T) {
 		require.NoError(t, repo.Create(t.Context(), equivalent))
 		require.Equal(t, first.ID, equivalent.ID)
 		err := repo.Create(t.Context(), &models.ActressAlias{AliasName: "CREATE ALIAS", CanonicalName: "Owner B"})
-		require.ErrorIs(t, err, ErrActressAliasAmbiguous)
+		require.ErrorIs(t, err, ErrActressAliasOwnershipConflict)
 	})
 
 	t.Run("create failure is wrapped", func(t *testing.T) {

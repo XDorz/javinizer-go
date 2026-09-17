@@ -172,7 +172,7 @@ func ResolveCollision(deps ActressDeps) gin.HandlerFunc {
 				c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: err.Error()})
 				return
 			}
-			if errors.Is(err, database.ErrCollisionNotOpen) {
+			if errors.Is(err, database.ErrCollisionNotOpen) || errors.Is(err, database.ErrActressAliasOwnershipConflict) || errors.Is(err, database.ErrActressAliasAmbiguous) {
 				c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: err.Error()})
 				return
 			}

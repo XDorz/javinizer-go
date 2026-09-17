@@ -20,6 +20,7 @@ func TestAliasResolverNormalizesLoadedKeysAndLookups(t *testing.T) {
 	cfg := &MetadataConfig{ActressDatabase: actressDatabaseConfigView{Enabled: true, ConvertAlias: true}}
 	resolver := NewAliasResolver(cfg, normalizedAliasLookupStub{aliases: map[string]string{
 		"  Stage   Name ": "Canonical Person",
+		"が":               "Japanese Canonical",
 	}})
 
 	actress := &models.Actress{FirstName: "STAGE", LastName: "name"}
@@ -27,4 +28,6 @@ func TestAliasResolverNormalizesLoadedKeysAndLookups(t *testing.T) {
 	require.Equal(t, "Canonical", actress.LastName)
 	require.Equal(t, "Person", actress.FirstName)
 	require.Equal(t, "Canonical Person", resolver.CanonicalName("", " stage ", " NAME "))
+	require.Equal(t, "Canonical Person", resolver.CanonicalName("", "ＳＴＡＧＥ", "ＮＡＭＥ"))
+	require.Equal(t, "Japanese Canonical", resolver.CanonicalName("か\u3099", "", ""))
 }

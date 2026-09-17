@@ -555,21 +555,6 @@ func TestCollisionServiceAdoptCanonicalRetargetsAliases(t *testing.T) {
 	require.Equal(t, credit.ActressID, found.ID)
 }
 
-func TestRetargetActressAliasesEarlyReturns(t *testing.T) {
-	db, _, credit, _ := collisionFixture(t)
-	require.NoError(t, retargetActressAliasesTx(db.DB, credit.ActressID, ""))
-	require.NoError(t, retargetActressAliasesTx(db.DB, credit.ActressID, "Original Truth"))
-	require.Error(t, retargetActressAliasesTx(db.DB, credit.ActressID+100, "Original Truth"))
-}
-
-func TestRetargetActressAliasesUpdateError(t *testing.T) {
-	db, _, credit, _ := collisionFixture(t)
-	require.NoError(t, db.Create(&models.ActressAlias{AliasName: "Legacy Name", CanonicalName: "Original Truth"}).Error)
-	require.NoError(t, db.Model(&models.Actress{}).Where("id = ?", credit.ActressID).Update("first_name", "Changed").Error)
-	require.NoError(t, db.DB.Exec("DROP TABLE actress_aliases").Error)
-	require.Error(t, retargetActressAliasesTx(db.DB, credit.ActressID, "Original Truth"))
-}
-
 func TestCollisionServiceAliasRetargetErrorRollsBack(t *testing.T) {
 	db, service, _, collision := collisionFixture(t)
 	require.NoError(t, db.DB.Exec("DROP TABLE actress_aliases").Error)
@@ -743,18 +728,20 @@ func TestReassignCreditReturnsLookupError(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestCollisionServiceAliasUpdatesExisting(t *testing.T) {
+func TestCollisionServiceAliasRejectsExistingOwner(t *testing.T) {
 	db, service, credit, collision := collisionFixture(t)
 	collision.CanonicalValue = ""
 	require.NoError(t, db.Save(&collision).Error)
 	alias := models.ActressAlias{AliasName: collision.ReportedValue, CanonicalName: "Old"}
 	require.NoError(t, db.Create(&alias).Error)
 	_, err := service.Resolve(context.Background(), collision.ID, models.CollisionResolutionAdoptAlias, 0)
-	require.NoError(t, err)
-	actress, err := service.Actresses.FindByID(context.Background(), credit.ActressID)
+	require.ErrorIs(t, err, ErrActressAliasOwnershipConflict)
+	_, err = service.Actresses.FindByID(context.Background(), credit.ActressID)
 	require.NoError(t, err)
 	require.NoError(t, db.First(&alias, alias.ID).Error)
-	require.Equal(t, actress.FullName(), alias.CanonicalName)
+	require.Equal(t, "Old", alias.CanonicalName)
+	require.NoError(t, db.First(&collision, collision.ID).Error)
+	require.Equal(t, models.CollisionStatusOpen, collision.Status)
 }
 
 func TestCollisionResolutionRejectsAliasForNonNameField(t *testing.T) {

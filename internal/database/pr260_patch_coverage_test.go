@@ -92,8 +92,8 @@ func TestPR260AliasUpsertTxPaths(t *testing.T) {
 		existing := models.ActressAlias{AliasName: "old", CanonicalName: "first"}
 		require.NoError(t, db.Create(&existing).Error)
 		updated := models.ActressAlias{AliasName: "old", CanonicalName: "second", UpdatedAt: time.Now().UTC()}
-		require.NoError(t, repo.UpsertTx(db.DB, &updated))
-		require.Equal(t, existing.ID, updated.ID)
+		require.ErrorIs(t, repo.UpsertTx(db.DB, &updated), ErrActressAliasOwnershipConflict)
+		require.Zero(t, updated.ID)
 	})
 	t.Run("create", func(t *testing.T) {
 		db := newCreditTestDB(t)

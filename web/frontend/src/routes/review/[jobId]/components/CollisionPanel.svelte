@@ -6,6 +6,7 @@
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import { apiClient } from '$lib/api/client';
+	import { ApiError } from '$lib/api/clients/common';
 	import type { Actress, CreditCollision, CollisionResolution } from '$lib/api/types';
 	import { formatActressName } from '$lib/utils/actress';
 
@@ -26,6 +27,7 @@
 	}));
 
 	let openCollisions = $derived(collisionsQuery.data?.collisions ?? []);
+	let reconciledConflict = $state<{ collisionId: number; movieContentId: string } | null>(null);
 
 	const resolveMutation = createMutation(() => ({
 		mutationFn: async (input: {
@@ -50,12 +52,39 @@
 			if (variables.movieContentId === movieContentId) {
 				await onResolved(res.remaining_open, variables.movieContentId);
 			}
+		},
+		onError: async (error, variables) => {
+			if (!(error instanceof ApiError) || error.status !== 409) return;
+			const queryKey = ['collisions', variables.movieContentId] as const;
+			await queryClient.refetchQueries({ queryKey, exact: true, type: 'active' });
+			const refreshed = queryClient.getQueryData<{ collisions: CreditCollision[] }>(queryKey);
+			const collisionGone =
+				refreshed !== undefined &&
+				!refreshed.collisions.some((collision) => collision.id === variables.collision.id);
+			if (collisionGone) {
+				reconciledConflict = {
+					collisionId: variables.collision.id,
+					movieContentId: variables.movieContentId
+				};
+				if (
+					relinkCollision?.id === variables.collision.id &&
+					relinkMovieContentId === variables.movieContentId
+				) {
+					closeRelink();
+				}
+			}
+			if (variables.movieContentId !== movieContentId) return;
+			await onResolved(refreshed?.collisions.length ?? 0, variables.movieContentId);
 		}
 	}));
 
 	let resolveError = $derived(
 		resolveMutation.isError &&
-		resolveMutation.variables?.movieContentId === movieContentId
+		resolveMutation.variables?.movieContentId === movieContentId &&
+		!(
+			reconciledConflict?.collisionId === resolveMutation.variables?.collision.id &&
+			reconciledConflict?.movieContentId === resolveMutation.variables?.movieContentId
+		)
 			? resolveMutation.error instanceof Error
 				? resolveMutation.error.message
 				: 'Resolution failed'
@@ -132,6 +161,7 @@
 		const target = selectedTarget;
 		if (!collision || !target || relinkMovieContentId !== movieContentId) return;
 		if (target.verified !== true || target.id === collision.current_actress_id) return;
+		reconciledConflict = null;
 		resolveMutation.mutate({
 			collision,
 			resolution: 'reassign',
@@ -146,6 +176,7 @@
 			void openRelink(collision);
 			return;
 		}
+		reconciledConflict = null;
 		resolveMutation.mutate({ collision, resolution, movieContentId });
 	}
 

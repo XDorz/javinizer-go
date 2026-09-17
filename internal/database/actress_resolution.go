@@ -157,10 +157,31 @@ func findCandidateByNameKeyTx(tx *gorm.DB, nameKey string) (*models.Actress, err
 	}
 	var found models.Actress
 	err := tx.Where("verified = ? AND name_key = ?", false, nameKey).First(&found).Error
-	if err != nil {
+	if err == nil {
+		return &found, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
-	return &found, nil
+	// A normalization migration leaves equivalent legacy conflicts keyless
+	// rather than deleting an identity or selecting an arbitrary owner.
+	var keyless []models.Actress
+	if err := tx.Where("verified = ? AND (name_key IS NULL OR name_key = ?)", false, "").Order("id").Find(&keyless).Error; err != nil {
+		return nil, err
+	}
+	var matches []models.Actress
+	for i := range keyless {
+		if actressNameKey(&keyless[i]) == nameKey {
+			matches = append(matches, keyless[i])
+		}
+	}
+	if len(matches) > 1 {
+		return nil, fmt.Errorf("candidate name key %q matches %d preserved identities: %w", nameKey, len(matches), ErrActressCandidateAmbiguous)
+	}
+	if len(matches) == 1 {
+		return &matches[0], nil
+	}
+	return nil, gorm.ErrRecordNotFound
 }
 
 func findCandidateByDMMIDTx(tx *gorm.DB, dmmID int) (*models.Actress, error) {

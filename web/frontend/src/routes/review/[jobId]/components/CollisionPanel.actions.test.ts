@@ -47,7 +47,7 @@ function renderPanel(rows: CreditCollision[]) {
 }
 
 afterEach(() => cleanup());
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => vi.resetAllMocks());
 
 describe('CollisionPanel server-derived actions', () => {
 	it('does not render backend-invalid actions for an unverified identity link', async () => {
@@ -93,5 +93,78 @@ describe('CollisionPanel server-derived actions', () => {
 		for (const name of [/Keep catalog/, /Adopt as truth/, 'Alias', 'Relink']) {
 			await waitFor(() => expect(view.getByRole('button', { name })).toBeTruthy());
 		}
+	});
+	it('refreshes a stale 409, closes the matching chooser, and updates the current movie', async () => {
+		const onResolved = vi.fn();
+		listCollisions
+			.mockResolvedValueOnce({ collisions: [collision({})] })
+			.mockResolvedValueOnce({ collisions: [] });
+		searchActresses.mockResolvedValue([
+			{ id: 8, first_name: 'Verified', last_name: 'Target', verified: true },
+		]);
+		const { ApiError } = await import('$lib/api/clients/common');
+		resolveCollision.mockRejectedValue(new ApiError('collision is not open', undefined, null, 409));
+		const view = render(
+			CollisionPanel,
+			{ movieContentId: 'movie-1', onResolved },
+			{
+				wrapper: QueryClientWrapper,
+				wrapperProps: {
+					client: new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+				},
+			},
+		);
+		await fireEvent.click(await view.findByRole('button', { name: 'Relink' }));
+		await fireEvent.click(await view.findByRole('button', { name: /Target Verified.*#8/ }));
+		await fireEvent.click(view.getByRole('button', { name: 'Confirm relink' }));
+		await waitFor(() => expect(listCollisions).toHaveBeenCalledTimes(2));
+		await waitFor(() => expect(view.queryByRole('button', { name: 'Confirm relink' })).toBeNull());
+		expect(view.queryByText('collision is not open')).toBeNull();
+		expect(view.queryByText(/organize is blocked/)).toBeNull();
+		expect(onResolved).toHaveBeenCalledWith(0, 'movie-1');
+	});
+
+	it('does not update a different movie parent after a stale 409', async () => {
+		const onResolved = vi.fn();
+		let rejectResolution!: (error: unknown) => void;
+		resolveCollision.mockImplementation(
+			() =>
+				new Promise((_, reject) => {
+					rejectResolution = reject;
+				}),
+		);
+		listCollisions.mockResolvedValue({ collisions: [collision({})] });
+		const view = render(
+			CollisionPanel,
+			{ movieContentId: 'movie-1', onResolved },
+			{
+				wrapper: QueryClientWrapper,
+				wrapperProps: {
+					client: new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+				},
+			},
+		);
+		await fireEvent.click(await view.findByRole('button', { name: /Adopt as truth/ }));
+		await view.rerender({ movieContentId: 'movie-2', onResolved });
+		const { ApiError } = await import('$lib/api/clients/common');
+		rejectResolution(new ApiError('collision is not open', undefined, null, 409));
+		await waitFor(() => expect(listCollisions).toHaveBeenCalledWith('movie-1'));
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(onResolved).not.toHaveBeenCalled();
+	});
+	it('keeps a retryable chooser and error on a non-stale 500', async () => {
+		listCollisions.mockResolvedValue({ collisions: [collision({})] });
+		searchActresses.mockResolvedValue([
+			{ id: 8, first_name: 'Verified', last_name: 'Target', verified: true },
+		]);
+		const { ApiError } = await import('$lib/api/clients/common');
+		resolveCollision.mockRejectedValue(new ApiError('temporary failure', undefined, null, 500));
+		const view = renderPanel([collision({})]);
+		await fireEvent.click(await view.findByRole('button', { name: 'Relink' }));
+		await fireEvent.click(await view.findByRole('button', { name: /Target Verified.*#8/ }));
+		await fireEvent.click(view.getByRole('button', { name: 'Confirm relink' }));
+		await waitFor(() => expect(view.getByText('temporary failure')).toBeTruthy());
+		expect(view.getByRole('button', { name: 'Confirm relink' })).toBeTruthy();
+		expect(listCollisions).toHaveBeenCalledTimes(1);
 	});
 });

@@ -596,25 +596,28 @@ func (r *ActressRepository) ImportUpsert(ctx context.Context, incoming *models.A
 		})
 	}
 	incoming.ID = existing.ID
-	incoming.CreatedAt = existing.CreatedAt
-	incoming.Verified = true
-	incoming.Origin = ActressOriginImport
-	if incoming.DMMID == 0 && existing.DMMID > 0 {
-		incoming.DMMID = existing.DMMID
-	}
-	promotingCandidate := !existing.Verified
-	previousIdentity := *existing
-	if existing.Verified && (existing.Origin == ActressOriginUser || existing.Origin == ActressOriginImport) {
-		incoming.Verified = existing.Verified
-		incoming.Origin = existing.Origin
-		incoming.DMMID = existing.DMMID
-		fillEmptyActressFields(existing, incoming)
-		incoming.FirstName = existing.FirstName
-		incoming.LastName = existing.LastName
-		incoming.JapaneseName = existing.JapaneseName
-		incoming.ThumbURL = existing.ThumbURL
-	}
 	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var previousIdentity models.Actress
+		if err := tx.First(&previousIdentity, incoming.ID).Error; err != nil {
+			return wrapDBErr("load", fmt.Sprintf("imported actress %d", incoming.ID), err)
+		}
+		incoming.CreatedAt = previousIdentity.CreatedAt
+		incoming.Verified = true
+		incoming.Origin = ActressOriginImport
+		if incoming.DMMID == 0 && previousIdentity.DMMID > 0 {
+			incoming.DMMID = previousIdentity.DMMID
+		}
+		promotingCandidate := !previousIdentity.Verified
+		if previousIdentity.Verified && (previousIdentity.Origin == ActressOriginUser || previousIdentity.Origin == ActressOriginImport) {
+			incoming.Verified = previousIdentity.Verified
+			incoming.Origin = previousIdentity.Origin
+			incoming.DMMID = previousIdentity.DMMID
+			fillEmptyActressFields(&previousIdentity, incoming)
+			incoming.FirstName = previousIdentity.FirstName
+			incoming.LastName = previousIdentity.LastName
+			incoming.JapaneseName = previousIdentity.JapaneseName
+			incoming.ThumbURL = previousIdentity.ThumbURL
+		}
 		contentIDs, err := movieContentIDsForActressesTx(tx, incoming.ID)
 		if err != nil {
 			return err
