@@ -13,13 +13,20 @@ import (
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
+const databaseNotConfiguredError = "database not configured"
+
 type candidateListResponse struct {
 	Candidates []models.Actress `json:"candidates"`
 	Total      int64            `json:"total"`
 }
 
+type collisionResponse struct {
+	models.CreditCollision
+	AllowedResolutions []string `json:"allowed_resolutions"`
+}
+
 type collisionListResponse struct {
-	Collisions []models.CreditCollision `json:"collisions"`
+	Collisions []collisionResponse `json:"collisions"`
 }
 
 // ListCandidates handles GET /actresses/candidates — quarantined scrape-created identities.
@@ -154,7 +161,7 @@ func ResolveCollision(deps ActressDeps) gin.HandlerFunc {
 			return
 		}
 		if deps.DB == nil {
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "database not configured"})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: databaseNotConfiguredError})
 			return
 		}
 		service := database.NewCollisionService(deps.DB)
@@ -198,7 +205,20 @@ func ListCollisions(deps ActressDeps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, collisionListResponse{Collisions: collisions})
+		if deps.DB == nil {
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: databaseNotConfiguredError})
+			return
+		}
+		allowed, err := database.NewCollisionService(deps.DB).AllowedResolutions(c.Request.Context(), collisions)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
+			return
+		}
+		response := make([]collisionResponse, 0, len(collisions))
+		for i := range collisions {
+			response = append(response, collisionResponse{CreditCollision: collisions[i], AllowedResolutions: allowed[collisions[i].ID]})
+		}
+		c.JSON(http.StatusOK, collisionListResponse{Collisions: response})
 	}
 }
 
@@ -233,7 +253,7 @@ func UpdateCreditOverride(deps ActressDeps) gin.HandlerFunc {
 			return
 		}
 		if deps.DB == nil {
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "database not configured"})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: databaseNotConfiguredError})
 			return
 		}
 		service := database.NewCollisionService(deps.DB)
@@ -279,7 +299,7 @@ func SuppressCredit(deps ActressDeps) gin.HandlerFunc {
 			return
 		}
 		if deps.DB == nil {
-			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: "database not configured"})
+			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: databaseNotConfiguredError})
 			return
 		}
 		service := database.NewCollisionService(deps.DB)

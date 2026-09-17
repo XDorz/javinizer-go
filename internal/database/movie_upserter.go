@@ -892,14 +892,7 @@ func (u *MovieUpserter) recordFieldCollisionsTx(tx *gorm.DB, collisionRepo *Cred
 	}
 	reportedNameKey := models.NormalizeActressNameKey(reportedName)
 	canonicalName := resolved.FullName()
-	canonicalNameMatches := false
-	for _, canonical := range []string{canonicalName, resolved.JapaneseName} {
-		canonicalKey := models.NormalizeActressNameKey(canonical)
-		if reportedNameKey != "" && canonicalKey != "" && reportedNameKey == canonicalKey {
-			canonicalNameMatches = true
-			break
-		}
-	}
+	canonicalNameMatches := actressNameMatchesCanonicalRepresentations(reportedName, resolved)
 	aliasNameMatches := false
 	if reportedNameKey != "" && !canonicalNameMatches {
 		var err error

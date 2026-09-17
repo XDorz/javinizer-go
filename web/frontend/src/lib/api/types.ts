@@ -668,6 +668,7 @@ export interface CreditCollision {
 	last_seen_at?: string;
 	created_at?: string;
 	updated_at?: string;
+	allowed_resolutions: CollisionResolution[];
 }
 
 export interface CandidateListResponse {

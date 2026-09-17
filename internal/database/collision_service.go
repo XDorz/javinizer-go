@@ -32,10 +32,92 @@ func NewCollisionService(db *DB) *CollisionService {
 	}
 }
 
+// AllowedCollisionResolutions returns the actions accepted by Resolve for the
+// collision's current field, status, and linked identity state.
+func AllowedCollisionResolutions(collision *models.CreditCollision, credit *models.MovieCredit) []string {
+	allowed := make([]string, 0, 4)
+	if collision == nil || credit == nil || collision.Status != models.CollisionStatusOpen {
+		return allowed
+	}
+	switch collision.Field {
+	case models.CreditFieldCreditedName:
+		allowed = append(allowed, models.CollisionResolutionKeepIdentity, models.CollisionResolutionAdoptCanonical, models.CollisionResolutionAdoptAlias, models.CollisionResolutionReassign)
+	case models.CreditFieldReportedThumb:
+		allowed = append(allowed, models.CollisionResolutionKeepIdentity, models.CollisionResolutionAdoptCanonical, models.CollisionResolutionReassign)
+	case models.CreditFieldIdentityLink:
+		if credit.Actress != nil && credit.Actress.Verified {
+			allowed = append(allowed, models.CollisionResolutionKeepIdentity)
+		}
+		allowed = append(allowed, models.CollisionResolutionAdoptCanonical, models.CollisionResolutionReassign)
+	}
+	return allowed
+}
+
+func validateCollisionResolution(collision *models.CreditCollision, credit *models.MovieCredit, resolution string, targetActressID uint) error {
+	allowed := AllowedCollisionResolutions(collision, credit)
+	for _, candidate := range allowed {
+		if candidate == resolution {
+			if resolution == models.CollisionResolutionReassign && targetActressID == 0 {
+				return fmt.Errorf("resolve collision: target_actress_id is required for reassign")
+			}
+			return nil
+		}
+	}
+	if collision != nil && collision.Field == models.CreditFieldIdentityLink && resolution == models.CollisionResolutionKeepIdentity {
+		return fmt.Errorf("resolve collision: keep_identity requires a verified identity")
+	}
+	if resolution == models.CollisionResolutionAdoptAlias {
+		return fmt.Errorf("resolve collision: adopt_alias requires a credited_name collision")
+	}
+	return fmt.Errorf("resolve collision: resolution %q is not allowed for this collision", resolution)
+}
+
+// AllowedResolutions derives action contracts for collisions using the linked
+// actress state loaded from the server; callers must not trust client claims.
+func (s *CollisionService) AllowedResolutions(ctx context.Context, collisions []models.CreditCollision) (map[uint][]string, error) {
+	result := make(map[uint][]string, len(collisions))
+	if len(collisions) == 0 {
+		return result, nil
+	}
+	creditIDs := make([]uint, 0, len(collisions))
+	for i := range collisions {
+		creditIDs = append(creditIDs, collisions[i].CreditID)
+	}
+	var credits []models.MovieCredit
+	if err := s.db.WithContext(ctx).Preload("Actress").Where("id IN ?", creditIDs).Find(&credits).Error; err != nil {
+		return nil, wrapDBErr("list", "collision credits", err)
+	}
+	byID := make(map[uint]*models.MovieCredit, len(credits))
+	for i := range credits {
+		byID[credits[i].ID] = &credits[i]
+	}
+	for i := range collisions {
+		credit := byID[collisions[i].CreditID]
+		if credit == nil {
+			return nil, fmt.Errorf("load collision credit %d: %w", collisions[i].CreditID, ErrNotFound)
+		}
+		result[collisions[i].ID] = AllowedCollisionResolutions(&collisions[i], credit)
+	}
+	return result, nil
+}
+
 // resolveTx applies the resolution outcome atomically and recomputes the
 // open-collision count.
 func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution string, targetActressID uint) (remaining int, err error) {
 	var collision models.CreditCollision
+	if err := tx.First(&collision, collisionID).Error; err != nil {
+		return 0, wrapDBErr("load", fmt.Sprintf("collision %d", collisionID), err)
+	}
+	if collision.Status != models.CollisionStatusOpen {
+		return 0, ErrCollisionNotOpen
+	}
+	var credit models.MovieCredit
+	if err := tx.Preload("Actress").First(&credit, collision.CreditID).Error; err != nil {
+		return 0, wrapDBErr("load", fmt.Sprintf("credit %d", collision.CreditID), err)
+	}
+	if err := validateCollisionResolution(&collision, &credit, resolution, targetActressID); err != nil {
+		return 0, err
+	}
 	res := tx.Model(&models.CreditCollision{}).
 		Where("id = ? AND status = ?", collisionID, models.CollisionStatusOpen).
 		Updates(map[string]interface{}{
@@ -49,14 +131,7 @@ func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution s
 	if res.RowsAffected == 0 {
 		return 0, ErrCollisionNotOpen
 	}
-	if err := tx.First(&collision, collisionID).Error; err != nil {
-		return 0, wrapDBErr("load", fmt.Sprintf("collision %d", collisionID), err)
-	}
 
-	var credit models.MovieCredit
-	if err := tx.Preload("Actress").First(&credit, collision.CreditID).Error; err != nil {
-		return 0, wrapDBErr("load", fmt.Sprintf("credit %d", collision.CreditID), err)
-	}
 	creditPtr := &credit
 	var previousIdentity *models.Actress
 	if credit.Actress != nil {
@@ -65,9 +140,6 @@ func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution s
 	}
 	switch resolution {
 	case models.CollisionResolutionKeepIdentity:
-		if collision.Field == models.CreditFieldIdentityLink && credit.Actress != nil && !credit.Actress.Verified {
-			return 0, fmt.Errorf("resolve collision: keep_identity requires a verified identity")
-		}
 		if err := applyCollisionFieldEffectTx(tx, credit.ID, collision.Field, resolution); err != nil {
 			return 0, err
 		}
@@ -125,9 +197,6 @@ func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution s
 			}
 		}
 	case models.CollisionResolutionAdoptAlias:
-		if collision.Field != models.CreditFieldCreditedName {
-			return 0, fmt.Errorf("resolve collision: adopt_alias requires a credited_name collision")
-		}
 		if err := applyCollisionFieldEffectTx(tx, credit.ID, collision.Field, resolution); err != nil {
 			return 0, err
 		}
@@ -140,9 +209,6 @@ func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution s
 			return 0, err
 		}
 	case models.CollisionResolutionReassign:
-		if targetActressID == 0 {
-			return 0, fmt.Errorf("resolve collision: target_actress_id is required for reassign")
-		}
 		if targetActressID == credit.ActressID {
 			return 0, fmt.Errorf("resolve collision: credit already linked to target identity")
 		}

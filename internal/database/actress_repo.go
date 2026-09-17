@@ -441,22 +441,35 @@ func (r *ActressRepository) FindVerifiedByAlias(ctx context.Context, aliasName s
 // FindVerifiedByExactName returns verified identities matching the given
 // name exactly (normalized). Multiple results indicate a homonym ambiguity.
 func (r *ActressRepository) FindVerifiedByExactName(ctx context.Context, japaneseName, firstName, lastName string) ([]models.Actress, error) {
-	key := ""
-	if ja := models.NormalizeActressNameKey(japaneseName); ja != "" {
-		key = ja
-	} else if firstName != "" || lastName != "" {
-		key = models.NormalizeActressNameKey(lastName + " " + firstName)
+	incoming := &models.Actress{JapaneseName: japaneseName, FirstName: firstName, LastName: lastName}
+	keys := make(map[string]struct{})
+	for _, representation := range canonicalActressRepresentations(incoming) {
+		if key := models.NormalizeActressNameKey(representation); key != "" {
+			keys[key] = struct{}{}
+		}
 	}
-	if key == "" {
+	if len(keys) == 0 {
 		return nil, nil
 	}
-	var found []models.Actress
-	err := r.GetDB().WithContext(ctx).Where(
-		"verified = ? AND (LOWER(TRIM(japanese_name)) = ? OR LOWER(TRIM(last_name || ' ' || first_name)) = ? OR LOWER(TRIM(first_name || ' ' || last_name)) = ?)",
-		true, key, key, key,
-	).Find(&found).Error
-	if err != nil {
-		return nil, wrapDBErr("find", fmt.Sprintf("verified actresses by name %s", key), err)
+
+	var verified []models.Actress
+	if err := r.GetDB().WithContext(ctx).Where("verified = ?", true).Order("id ASC").Find(&verified).Error; err != nil {
+		return nil, wrapDBErr("find", "verified actresses by canonical name", err)
+	}
+	found := make([]models.Actress, 0)
+	seen := make(map[uint]struct{})
+	for i := range verified {
+		for _, representation := range canonicalActressRepresentations(&verified[i]) {
+			key := models.NormalizeActressNameKey(representation)
+			if _, matches := keys[key]; key == "" || !matches {
+				continue
+			}
+			if _, duplicate := seen[verified[i].ID]; !duplicate {
+				seen[verified[i].ID] = struct{}{}
+				found = append(found, verified[i])
+			}
+			break
+		}
 	}
 	return found, nil
 }

@@ -8168,53 +8168,6 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_javinizer_javinizer-go_internal_models.CreditCollision": {
-            "type": "object",
-            "properties": {
-                "canonical_value": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "credit_id": {
-                    "type": "integer"
-                },
-                "field": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "integer"
-                },
-                "last_seen_at": {
-                    "type": "string"
-                },
-                "movie_content_id": {
-                    "type": "string"
-                },
-                "occurrences": {
-                    "type": "integer"
-                },
-                "reported_value": {
-                    "type": "string"
-                },
-                "resolution": {
-                    "type": "string"
-                },
-                "sources_seen": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "user_pinned": {
-                    "type": "boolean"
-                }
-            }
-        },
         "github_com_javinizer_javinizer-go_internal_models.CropBounds": {
             "type": "object",
             "properties": {
@@ -8964,8 +8917,61 @@ const docTemplate = `{
                 "collisions": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_models.CreditCollision"
+                        "$ref": "#/definitions/internal_api_actress.collisionResponse"
                     }
+                }
+            }
+        },
+        "internal_api_actress.collisionResponse": {
+            "type": "object",
+            "properties": {
+                "allowed_resolutions": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "canonical_value": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "credit_id": {
+                    "type": "integer"
+                },
+                "field": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "last_seen_at": {
+                    "type": "string"
+                },
+                "movie_content_id": {
+                    "type": "string"
+                },
+                "occurrences": {
+                    "type": "integer"
+                },
+                "reported_value": {
+                    "type": "string"
+                },
+                "resolution": {
+                    "type": "string"
+                },
+                "sources_seen": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_pinned": {
+                    "type": "boolean"
                 }
             }
         },

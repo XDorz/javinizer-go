@@ -37,7 +37,11 @@
 				target_actress_id: input.targetActressId
 			}),
 		onSuccess: async (res, variables) => {
-			void queryClient.invalidateQueries({ queryKey: ['collisions'] });
+			await queryClient.refetchQueries({
+				queryKey: ['collisions', variables.movieContentId],
+				exact: true,
+				type: 'active'
+			});
 			if (variables.movieContentId === movieContentId) {
 				await onResolved(res.remaining_open, variables.movieContentId);
 			}
@@ -138,26 +142,30 @@
 								<p class="truncate font-medium">{collision.canonical_value || '—'}</p>
 							</div>
 						</div>
-						<div class="flex flex-wrap gap-2 pt-1">
-							<Button
-								variant="outline"
-								size="sm"
-								disabled={resolveMutation.isPending}
-								onclick={() => resolve(collision, 'keep_identity')}
-							>
-								{#if pendingCollisionId === collision.id}<Loader2 class="size-3.5 animate-spin" />{/if}
-								<Unlink class="size-3.5" /> Keep catalog
-							</Button>
-							<Button
-								variant="outline"
-								size="sm"
-								disabled={resolveMutation.isPending}
-								onclick={() => resolve(collision, 'adopt_canonical')}
-							>
-								{#if pendingCollisionId === collision.id}<Loader2 class="size-3.5 animate-spin" />{/if}
-								<Tag class="size-3.5" /> Adopt as truth
-							</Button>
-							{#if collision.field === 'credited_name'}
+						<div class="flex flex-wrap gap-2 pt-1" aria-label="Available collision resolutions">
+							{#if collision.allowed_resolutions.includes('keep_identity')}
+								<Button
+									variant="outline"
+									size="sm"
+									disabled={resolveMutation.isPending}
+									onclick={() => resolve(collision, 'keep_identity')}
+								>
+									{#if pendingCollisionId === collision.id}<Loader2 class="size-3.5 animate-spin" />{/if}
+									<Unlink class="size-3.5" /> Keep catalog
+								</Button>
+							{/if}
+							{#if collision.allowed_resolutions.includes('adopt_canonical')}
+								<Button
+									variant="outline"
+									size="sm"
+									disabled={resolveMutation.isPending}
+									onclick={() => resolve(collision, 'adopt_canonical')}
+								>
+									{#if pendingCollisionId === collision.id}<Loader2 class="size-3.5 animate-spin" />{/if}
+									<Tag class="size-3.5" /> Adopt as truth
+								</Button>
+							{/if}
+							{#if collision.allowed_resolutions.includes('adopt_alias')}
 								<Button
 									variant="outline"
 									size="sm"
@@ -167,14 +175,16 @@
 									Alias
 								</Button>
 							{/if}
-							<Button
-								variant="outline"
-								size="sm"
-								disabled={resolveMutation.isPending}
-								onclick={() => resolve(collision, 'reassign')}
-							>
-								Relink
-							</Button>
+							{#if collision.allowed_resolutions.includes('reassign')}
+								<Button
+									variant="outline"
+									size="sm"
+									disabled={resolveMutation.isPending}
+									onclick={() => resolve(collision, 'reassign')}
+								>
+									Relink
+								</Button>
+							{/if}
 						</div>
 					</li>
 				{/each}

@@ -147,3 +147,81 @@ func itoa(v uint) string {
 	}
 	return digits
 }
+
+func TestCollisionEndpointsExposeAndEnforceAllowedResolutions(t *testing.T) {
+	db, err := database.New(&database.Config{Type: "sqlite", DSN: ":memory:", LogLevel: "silent"})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	require.NoError(t, db.RunMigrationsOnStartup(t.Context()))
+	repos := db.Repositories()
+	candidate := models.Actress{FirstName: "Candidate", LastName: "Identity", Verified: false, Origin: "scrape"}
+	require.NoError(t, db.Create(&candidate).Error)
+	movie := models.Movie{ContentID: "allowed-actions", ID: "allowed-actions"}
+	require.NoError(t, db.Create(&movie).Error)
+	credit := models.MovieCredit{MovieContentID: movie.ContentID, ActressID: candidate.ID, CreditedName: "Identity Candidate"}
+	require.NoError(t, db.Create(&credit).Error)
+	collision := models.CreditCollision{CreditID: credit.ID, MovieContentID: movie.ContentID, Field: models.CreditFieldIdentityLink, ReportedValue: "Identity Candidate", CanonicalValue: "Identity Candidate", Status: models.CollisionStatusOpen}
+	require.NoError(t, db.Create(&collision).Error)
+
+	deps := NewActressDeps(repos.ContentRepos, repos.TranslationRepos)
+	router := gin.New()
+	RegisterRoutes(router.Group("/"), deps)
+
+	list := httptest.NewRecorder()
+	router.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/actresses/collisions?movie_id=allowed-actions", nil))
+	require.Equal(t, http.StatusOK, list.Code)
+	var response struct {
+		Collisions []struct {
+			ID      uint     `json:"id"`
+			Allowed []string `json:"allowed_resolutions"`
+		} `json:"collisions"`
+	}
+	require.NoError(t, json.Unmarshal(list.Body.Bytes(), &response))
+	require.Len(t, response.Collisions, 1)
+	require.ElementsMatch(t, []string{models.CollisionResolutionAdoptCanonical, models.CollisionResolutionReassign}, response.Collisions[0].Allowed)
+
+	body, err := json.Marshal(map[string]string{"resolution": models.CollisionResolutionKeepIdentity})
+	require.NoError(t, err)
+	rejected := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/actresses/collisions/"+itoa(collision.ID)+"/resolve", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rejected, req)
+	require.Equal(t, http.StatusBadRequest, rejected.Code)
+	require.NoError(t, db.First(&collision, collision.ID).Error)
+	require.Equal(t, models.CollisionStatusOpen, collision.Status)
+}
+
+func TestListCollisionsResolutionPolicyFailures(t *testing.T) {
+	t.Run("database dependency missing", func(t *testing.T) {
+		db, err := database.New(&database.Config{Type: "sqlite", DSN: ":memory:", LogLevel: "silent"})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = db.Close() })
+		require.NoError(t, db.RunMigrationsOnStartup(t.Context()))
+		repos := db.Repositories()
+		deps := NewActressDeps(repos.ContentRepos, repos.TranslationRepos)
+		deps.DB = nil
+		router := gin.New()
+		RegisterRoutes(router.Group("/"), deps)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/actresses/collisions?movie_id=missing-db", nil))
+		require.Equal(t, http.StatusInternalServerError, response.Code)
+		require.Contains(t, response.Body.String(), databaseNotConfiguredError)
+	})
+
+	t.Run("orphaned collision credit", func(t *testing.T) {
+		db, err := database.New(&database.Config{Type: "sqlite", DSN: ":memory:", LogLevel: "silent"})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = db.Close() })
+		require.NoError(t, db.RunMigrationsOnStartup(t.Context()))
+		repos := db.Repositories()
+		orphan := models.CreditCollision{CreditID: 999, MovieContentID: "orphan-policy", Field: models.CreditFieldCreditedName, Status: models.CollisionStatusOpen}
+		require.NoError(t, db.Create(&orphan).Error)
+		deps := NewActressDeps(repos.ContentRepos, repos.TranslationRepos)
+		router := gin.New()
+		RegisterRoutes(router.Group("/"), deps)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/actresses/collisions?movie_id=orphan-policy", nil))
+		require.Equal(t, http.StatusInternalServerError, response.Code)
+		require.Contains(t, response.Body.String(), "load collision credit 999")
+	})
+}
