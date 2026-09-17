@@ -65,43 +65,27 @@ func TestPR260PublicationFinalCleanupFaults(t *testing.T) {
 			require.NotEmpty(t, stage.root)
 			exists, e := afero.Exists(base, source)
 			require.NoError(t, e)
-			if tc.role == "video" {
-				require.True(t, exists)
-			} else {
-				require.False(t, exists)
-				exists, e = afero.Exists(base, subtitle)
-				require.NoError(t, e)
-				require.True(t, exists)
-			}
-			finalEntries, e := afero.ReadDir(base, dest)
+			require.True(t, exists, "cleanup failure restores the original video before final rollback")
+			exists, e = afero.Exists(base, subtitle)
 			require.NoError(t, e)
-			require.NotEmpty(t, finalEntries, "post-install cleanup failure must not silently erase published media")
+			require.True(t, exists, "cleanup failure preserves/restores original sidecars")
+			finalFiles := 0
+			_ = afero.Walk(base, dest, func(_ string, info os.FileInfo, walkErr error) error {
+				if walkErr != nil {
+					return walkErr
+				}
+				if info.Mode().IsRegular() {
+					finalFiles++
+				}
+				return nil
+			})
+			require.Zero(t, finalFiles, "cleanup failure rolls published final files back")
 			bytes, e := afero.ReadFile(base, unrelated)
 			require.NoError(t, e)
 			require.Equal(t, "unrelated", string(bytes))
 			exists, e = afero.Exists(base, multipart)
 			require.NoError(t, e)
-			if !exists {
-				var found bool
-				require.NoError(t, afero.Walk(base, dest, func(path string, info os.FileInfo, walkErr error) error {
-					if walkErr != nil {
-						return walkErr
-					}
-					if info.IsDir() {
-						return nil
-					}
-					data, readErr := afero.ReadFile(base, path)
-					if readErr != nil {
-						return readErr
-					}
-					if string(data) == "part two" {
-						found = true
-					}
-					return nil
-				}))
-
-				require.True(t, found, "multipart must remain accessible in final media")
-			}
+			require.True(t, exists, "multipart original is restored before final rollback")
 			stage.cleanup()
 			pr260AssertStageGone(t, base, root)
 		})
@@ -109,7 +93,7 @@ func TestPR260PublicationFinalCleanupFaults(t *testing.T) {
 }
 
 func TestPR260PublicationSidecarFinalizeFaults(t *testing.T) {
-	for _, tc := range []struct{ op, want string }{{"stat", "inspect staged sidecar"}, {"rename", "stage sidecar"}} {
+	for _, tc := range []struct{ op, want string }{{"stat", "preflight staged artifacts"}, {"rename", "stage sidecar"}} {
 		t.Run(tc.op, func(t *testing.T) {
 			db, _ := pr260ArtifactDB(t)
 			movie := pr260FencedMovie(t, db, "sidecar-"+tc.op, "")
@@ -129,12 +113,23 @@ func TestPR260PublicationSidecarFinalizeFaults(t *testing.T) {
 			err = stage.publish(context.Background(), orch, state, nil)
 			require.ErrorContains(t, err, tc.want)
 			pr260AssertRetained(t, base, source, subtitle, multipart, unrelated)
-			entries, listErr := afero.ReadDir(base, dest)
-			require.NoError(t, listErr)
-			require.NotEmpty(t, entries, "final video precedes sidecar rehome fault")
+			regularFiles := 0
+			walkErr := afero.Walk(base, dest, func(_ string, info os.FileInfo, err error) error {
+				if err != nil {
+					return err
+				}
+				if info.Mode().IsRegular() {
+					regularFiles++
+				}
+				return nil
+			})
+			if walkErr != nil {
+				require.True(t, os.IsNotExist(walkErr))
+			}
+			require.Zero(t, regularFiles, "failed staged publication rolls every final file back")
 			exists, e := afero.Exists(base, renamed)
 			require.NoError(t, e)
-			require.False(t, exists, "final video moved before sidecar rehome error")
+			require.Equal(t, tc.op == "stat", exists, "preflight rejection preserves staging; post-publish rollback may consume it")
 			stage.cleanup()
 			pr260AssertStageGone(t, base, root)
 		})

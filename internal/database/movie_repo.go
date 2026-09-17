@@ -134,7 +134,10 @@ func (r *MovieRepository) WithApplyPublicationFence(ctx context.Context, content
 // ErrApplyArtifactPublicationBlocked indicates an open collision prevents artifact publication.
 var ErrApplyArtifactPublicationBlocked = errors.New("apply artifact publication blocked by open collision")
 
-// WithApplyArtifactPublicationFence checks admission before publishing under a movie transaction.
+// WithApplyArtifactPublicationFence admits and finalizes publication in short
+// database transactions. The publisher runs outside either transaction so its
+// filesystem work and durable journal writes never hold or contend with a
+// long-lived SQLite writer.
 func (r *MovieRepository) WithApplyArtifactPublicationFence(ctx context.Context, contentID string, expectedGeneration int64, publish func(*models.Movie) error) error {
 	if strings.TrimSpace(contentID) == "" {
 		return fmt.Errorf("apply artifact publication fence: empty content id")
@@ -145,9 +148,46 @@ func (r *MovieRepository) WithApplyArtifactPublicationFence(ctx context.Context,
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	// Commit admission before touching the filesystem. Journal appends made by
+	// publish then commit independently before any destructive destination move.
 	if err := r.admitArtifactPublication(ctx, contentID, expectedGeneration); err != nil {
 		return err
 	}
+	var authoritative *models.Movie
+	if err := r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		movie, err := r.lockAndLoadArtifactPublicationMovie(ctx, tx, contentID)
+		if err != nil {
+			return err
+		}
+		if movie.RenderGeneration != expectedGeneration {
+			return fmt.Errorf("%w: movie %s expected %d, found %d", ErrApplyPublicationStale, contentID, expectedGeneration, movie.RenderGeneration)
+		}
+		var openCollisions int64
+		if err := tx.WithContext(ctx).Model(&models.CreditCollision{}).Where("movie_content_id = ? AND status = ?", contentID, models.CollisionStatusOpen).Count(&openCollisions).Error; err != nil {
+			return wrapDBErr("count", fmt.Sprintf("open collisions for movie %s", contentID), err)
+		}
+		if openCollisions != 0 {
+			return fmt.Errorf("%w: movie %s", ErrApplyArtifactPublicationBlocked, contentID)
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		authoritative = movie
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := publish(authoritative); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if authoritative.RenderGeneration != expectedGeneration {
+		return fmt.Errorf("%w: movie %s expected %d after publication, found %d", ErrApplyPublicationStale, contentID, expectedGeneration, authoritative.RenderGeneration)
+	}
+	// A concurrent generation or collision change rejects finalization. The
+	// caller then compensates the already-journaled filesystem transaction.
 	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		movie, err := r.lockAndLoadArtifactPublicationMovie(ctx, tx, contentID)
 		if err != nil {
@@ -167,15 +207,6 @@ func (r *MovieRepository) WithApplyArtifactPublicationFence(ctx context.Context,
 		}
 		if err := ctx.Err(); err != nil {
 			return err
-		}
-		if err := publish(movie); err != nil {
-			return err
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if movie.RenderGeneration != expectedGeneration {
-			return fmt.Errorf("%w: movie %s expected %d after publication, found %d", ErrApplyPublicationStale, contentID, expectedGeneration, movie.RenderGeneration)
 		}
 		cleaned := tx.WithContext(ctx).Model(&models.Movie{}).
 			Where("content_id = ? AND render_generation = ?", contentID, expectedGeneration).

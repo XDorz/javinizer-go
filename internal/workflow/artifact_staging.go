@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/downloader"
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
@@ -30,17 +31,22 @@ type artifactSibling struct {
 }
 
 type artifactStage struct {
-	fs            afero.Fs
-	fencer        database.ApplyArtifactPublicationFencer
-	root          string
-	finalRoot     string
-	sourcePath    string
-	stagedSource  string
-	siblings      []artifactSibling
-	inPlace       bool
-	original      ApplyCmd
-	rejected      bool
-	duplicatePlan *organizer.OrganizePlan
+	fs                 afero.Fs
+	fencer             database.ApplyArtifactPublicationFencer
+	root               string
+	finalRoot          string
+	sourcePath         string
+	stagedSource       string
+	siblings           []artifactSibling
+	inPlace            bool
+	original           ApplyCmd
+	rejected           bool
+	duplicatePlan      *organizer.OrganizePlan
+	publishBatch       *downloader.ReplacementBatch
+	publishCtx         context.Context
+	completedBatch     *downloader.ReplacementBatch
+	unresolvedBatch    *downloader.ReplacementBatch
+	sourceCleanupArmed bool
 }
 
 var errArtifactDirtyAdmission = errors.New("artifact publication preparation failed")
@@ -349,12 +355,21 @@ func (s *artifactStage) publish(ctx context.Context, o *applyOrchImpl, state *ap
 		if authoritative == nil || authoritative.RenderGeneration != s.original.Movie.RenderGeneration {
 			return fmt.Errorf("artifact publication authoritative movie changed")
 		}
-		return s.publishUnderFence(ctx, o, state, steps)
+		return s.publishUnderFence(ctx, o, state.operationID, state, steps)
 	})
 	// Only a never-persisted movie may use the legacy publication path.
 	if errors.Is(returnErr, database.ErrNotFound) && !s.original.PersistedMovie {
-		returnErr = s.publishUnderFence(ctx, o, state, steps)
+		returnErr = s.publishUnderFence(ctx, o, state.operationID, state, steps)
 	}
+	// Finalization rechecks generation and collision state after filesystem
+	// publication. If that short transaction rejects the result, compensate the
+	// already-journaled filesystem transaction.
+	if returnErr != nil && s.completedBatch != nil {
+		if rollbackErr := s.completedBatch.Rollback(context.WithoutCancel(ctx)); rollbackErr != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("rollback staged publication after fence failure: %w", rollbackErr))
+		}
+	}
+	s.completedBatch, s.unresolvedBatch = nil, nil
 	s.finishDuplicateClaim(returnErr)
 	if errors.Is(returnErr, database.ErrApplyPublicationStale) {
 		s.rejected = true
@@ -372,9 +387,32 @@ func (s *artifactStage) reject(state *applyPipelineState) {
 	state.targetDir = s.finalRoot
 }
 
-func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl, state *applyPipelineState, steps *stepCompletion) error {
+func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl, opID OperationID, state *applyPipelineState, steps *stepCompletion) (returnErr error) {
+	batch, err := downloader.NewReplacementBatch(s.fs, opID, replacementRecorder(o.revertLog))
+	if err != nil {
+		return err
+	}
+	s.publishBatch, s.publishCtx = batch, ctx
+	committed := false
+	createdFinalParent := ""
+	defer func() {
+		s.publishBatch, s.publishCtx = nil, nil
+		if !committed {
+			if rollbackErr := batch.Rollback(context.WithoutCancel(ctx)); rollbackErr != nil {
+				s.unresolvedBatch = batch
+				returnErr = errors.Join(returnErr, fmt.Errorf("rollback staged publication: %w", rollbackErr))
+			}
+			if createdFinalParent != "" {
+				_ = s.fs.Remove(createdFinalParent)
+			}
+		} else if returnErr == nil {
+			s.completedBatch = batch
+		}
+	}()
 	var finalResult *organizer.OrganizeResult
+	finalReplaced := false
 	stagedVideo := ""
+	videoInstalledByTree := false
 	if !s.original.Organize.Skip {
 		if state.organizeResult == nil {
 			return fmt.Errorf("artifact publication has no organize result")
@@ -396,19 +434,76 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			match.Path = s.sourcePath
 		}
 		match.Name = filepath.Base(match.Path)
-		plan, err := executor.PlanOrganize(ctx, organizer.OrganizeCmd{Match: match, Movie: s.original.Movie, DestDir: s.finalRoot, ForceUpdate: s.original.Organize.ForceUpdate, MoveFiles: s.original.Organize.MoveFiles, LinkMode: s.original.Organize.LinkMode, OperationMode: s.original.OperationMode, ForceRenameFile: s.original.Organize.ForceRenameFile})
+		organizeCmd := organizer.OrganizeCmd{Match: match, Movie: s.original.Movie, DestDir: s.finalRoot, ForceUpdate: s.original.Organize.ForceUpdate, MoveFiles: s.original.Organize.MoveFiles, LinkMode: s.original.Organize.LinkMode, OperationMode: s.original.OperationMode, ForceRenameFile: s.original.Organize.ForceRenameFile}
+		plan, err := executor.PlanOrganize(ctx, organizeCmd)
 		if err != nil {
 			return fmt.Errorf("replan artifact publication: %w", err)
 		}
 		if !executor.PlanSourceExists(plan) {
 			return fmt.Errorf("artifact publication staged source disappeared: %s", stagedVideo)
 		}
+		artifactDestinations, preflightErr := s.treeDestinations(stagedVideo, filepath.Dir(s.stagedSource), filepath.Dir(stagedVideo), plan.TargetDir)
+		if s.inPlace {
+			videoInstalledByTree = filepath.Clean(plan.SourcePath) == filepath.Clean(plan.TargetPath)
+			skipVideo := stagedVideo
+			if videoInstalledByTree {
+				skipVideo = ""
+			}
+			artifactDestinations, preflightErr = s.treeDestinations(skipVideo, "", "", "")
+		}
+		if preflightErr != nil {
+			return preflightErr
+		}
+		if err := batch.Preflight(append([]string{plan.TargetPath}, artifactDestinations...)); err != nil {
+			return err
+		}
+		if filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) {
+			if !s.inPlace {
+				parent := filepath.Dir(plan.TargetPath)
+				if _, err := s.fs.Stat(parent); os.IsNotExist(err) {
+					createdFinalParent = parent
+				}
+				if err := s.fs.MkdirAll(parent, 0o755); err != nil {
+					return fmt.Errorf("create final video destination: %w", err)
+				}
+			}
+			var armErr error
+			finalReplaced, armErr = batch.BeforePublish(ctx, plan.TargetPath, s.original.Organize.ForceUpdate)
+			if armErr != nil {
+				return armErr
+			}
+			// The organizer acquires the same non-reentrant destination lock, so
+			// batch must hand it off. Replan without overwrite authority after
+			// vacating the journaled occupant: a late claimant then hits the
+			// organizer's no-replace guard instead of being destroyed.
+			organizeCmd.ForceUpdate = false
+			guardedPlan, planErr := executor.PlanOrganize(ctx, organizeCmd)
+			if planErr != nil {
+				return fmt.Errorf("guard staged video publication: %w", planErr)
+			}
+			if filepath.Clean(guardedPlan.SourcePath) != filepath.Clean(plan.SourcePath) || filepath.Clean(guardedPlan.TargetPath) != filepath.Clean(plan.TargetPath) {
+				return fmt.Errorf("guard staged video publication changed planned paths")
+			}
+			plan = guardedPlan
+			batch.YieldToLockedPublisher(plan.TargetPath)
+		}
 		finalResult, err = executor.ExecuteOrganizePlan(plan, s.original.Organize.MoveFiles || s.original.Organize.LinkMode == organizer.LinkModeNone, s.original.Organize.LinkMode)
+		if filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) && (err == nil || fsutil.PublishCompleted(err)) {
+			batch.ObservePublishResult(plan.TargetPath)
+		}
 		if err != nil {
 			return fmt.Errorf("publish organized video: %w", err)
 		}
 		if finalResult == nil {
 			return fmt.Errorf("publish organized video returned no result")
+		}
+		if filepath.Clean(plan.SourcePath) != filepath.Clean(plan.TargetPath) {
+			if err := batch.ConfirmPublish(ctx, plan.TargetPath); err != nil {
+				return err
+			}
+		}
+		if finalReplaced {
+			finalResult.Warnings = append(finalResult.Warnings, organizer.AuthorizedOverwriteWarning(plan.TargetPath))
 		}
 		finalResult.OriginalPath = s.sourcePath
 	}
@@ -428,10 +523,54 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			finalArtifactDir = filepath.Dir(finalResult.NewPath)
 		}
 	}
-	preservedMedia, err := s.installTree(stagedVideo, artifactSkipDir, state.downloadPaths, stagedArtifactDir, finalArtifactDir)
+	installSkipVideo := stagedVideo
+	if videoInstalledByTree {
+		installSkipVideo = ""
+	}
+	preservedMedia, err := s.installTree(installSkipVideo, artifactSkipDir, state.downloadPaths, stagedArtifactDir, finalArtifactDir)
 	if err != nil {
 		return err
 	}
+	// In-place organizer execution occurs inside the owned staging tree. Map
+	// its result before source cleanup and inverse persistence so both use the
+	// actual published paths rather than ephemeral staging names.
+	if finalResult != nil && s.inPlace {
+		if finalResult.NewPath != "" {
+			finalResult.NewPath, err = s.finalPath(finalResult.NewPath)
+			if err != nil {
+				return err
+			}
+		}
+		if finalResult.FolderPath != "" {
+			finalResult.FolderPath, err = s.finalPath(finalResult.FolderPath)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	if finalResult != nil {
+		state.organizeResult = finalResult
+		state.finalDir, state.targetDir = finalResult.FolderPath, finalResult.FolderPath
+	} else {
+		state.finalDir, state.targetDir = s.finalRoot, s.finalRoot
+	}
+	if state.nfoPath != "" {
+		state.nfoPath, err = s.publicationPath(state.nfoPath, stagedArtifactDir, finalArtifactDir)
+		if err != nil {
+			return err
+		}
+	}
+	mappedDownloads := make([]string, 0, len(state.downloadPaths))
+	for _, path := range state.downloadPaths {
+		mapped, mapErr := s.publicationPath(path, stagedArtifactDir, finalArtifactDir)
+		if mapErr != nil {
+			return mapErr
+		}
+		if !batch.IsReplacement(mapped) {
+			mappedDownloads = append(mappedDownloads, mapped)
+		}
+	}
+	state.downloadPaths = mappedDownloads
 	if preservedMedia && steps != nil {
 		steps.PosterVerified = false
 	}
@@ -440,27 +579,54 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		// under .source. Publish them before removing any original sidecar.
 		for _, sibling := range s.siblings {
 			target := filepath.Join(filepath.Dir(finalResult.NewPath), stagedArtifactSiblingName(filepath.Base(s.sourcePath), filepath.Base(finalResult.NewPath), filepath.Base(sibling.sourcePath)))
-			if _, err := s.fs.Stat(target); os.IsNotExist(err) {
-				info, statErr := s.fs.Stat(sibling.stagedPath)
-				if statErr != nil {
-					return fmt.Errorf("inspect staged publication sidecar: %w", statErr)
+			if _, statErr := s.fs.Stat(target); os.IsNotExist(statErr) {
+				info, sourceErr := s.fs.Stat(sibling.stagedPath)
+				if sourceErr != nil {
+					return fmt.Errorf("inspect staged publication sidecar: %w", sourceErr)
+				}
+				if _, armErr := batch.BeforePublish(ctx, target, false); armErr != nil {
+					return armErr
 				}
 				if copyErr := copyArtifactFile(s.fs, sibling.stagedPath, target, info.Mode().Perm()); copyErr != nil {
 					return fmt.Errorf("publish sidecar before source cleanup: %w", copyErr)
 				}
-			} else if err != nil {
-				return fmt.Errorf("inspect publication sidecar: %w", err)
+				if confirmErr := batch.ConfirmPublish(ctx, target); confirmErr != nil {
+					return confirmErr
+				}
+				state.downloadPaths = append(state.downloadPaths, target)
+			} else if statErr != nil {
+				return fmt.Errorf("inspect publication sidecar: %w", statErr)
 			}
 		}
+		// Persist the final-path inverse before deleting any source. A crash
+		// after this point leaves history with every published path.
+		if o.revertLog != nil && opID != "" {
+			partial := &ApplyResult{OrganizeResult: finalResult, Movie: state.movie, DownloadPaths: state.downloadPaths, NFOPath: state.nfoPath, FoundNFOPath: state.foundNFOPath, Merged: state.merged, OperationID: opID}
+			if err := o.revertLog.Complete(ctx, opID, partial); err != nil {
+				return fmt.Errorf("persist inverse before source cleanup: %w", err)
+			}
+		}
+		s.sourceCleanupArmed = true
+		if err := batch.SetRollbackOrigin(finalResult.NewPath, s.sourcePath); err != nil {
+			return err
+		}
 		if err := s.fs.Remove(s.sourcePath); err != nil {
+			_ = batch.SetRollbackOrigin(finalResult.NewPath, "")
 			return fmt.Errorf("remove original after artifact publication: %w", err)
 		}
 		for _, sibling := range s.siblings {
-			if err := s.fs.Remove(sibling.sourcePath); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("remove original sidecar after artifact publication: %w", err)
+			target := filepath.Join(filepath.Dir(finalResult.NewPath), stagedArtifactSiblingName(filepath.Base(s.sourcePath), filepath.Base(finalResult.NewPath), filepath.Base(sibling.sourcePath)))
+			if err := batch.SetRollbackOrigin(target, sibling.sourcePath); err != nil {
+				return err
+			}
+			if err := s.fs.Remove(sibling.sourcePath); err != nil {
+				_ = batch.SetRollbackOrigin(target, "")
+				if !os.IsNotExist(err) {
+					return fmt.Errorf("remove original sidecar after artifact publication: %w", err)
+				}
 			}
 		}
-		if s.inPlace && state.organizeResult != nil && state.organizeResult.InPlaceRenamed && finalResult.FolderPath != "" {
+		if s.inPlace && finalResult.FolderPath != "" {
 			oldDir := filepath.Dir(s.sourcePath)
 			if filepath.Clean(oldDir) != filepath.Clean(finalResult.FolderPath) {
 				if entries, readErr := afero.ReadDir(s.fs, oldDir); readErr == nil && len(entries) == 0 {
@@ -469,40 +635,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 			}
 		}
 	}
-	if finalResult != nil {
-		if s.inPlace {
-			if finalResult.NewPath != "" {
-				if mapped, mapErr := s.finalPath(finalResult.NewPath); mapErr == nil {
-					finalResult.NewPath = mapped
-				}
-			}
-			if finalResult.FolderPath != "" {
-				if mapped, mapErr := s.finalPath(finalResult.FolderPath); mapErr == nil {
-					finalResult.FolderPath = mapped
-				}
-			}
-		}
-		state.organizeResult = finalResult
-		state.finalDir = finalResult.FolderPath
-		state.targetDir = finalResult.FolderPath
-	} else {
-		state.finalDir = s.finalRoot
-		state.targetDir = s.finalRoot
-	}
-	if state.nfoPath != "" {
-		mapped, err := s.publicationPath(state.nfoPath, stagedArtifactDir, finalArtifactDir)
-		if err != nil {
-			return err
-		}
-		state.nfoPath = mapped
-	}
-	for i, path := range state.downloadPaths {
-		mapped, err := s.publicationPath(path, stagedArtifactDir, finalArtifactDir)
-		if err != nil {
-			return err
-		}
-		state.downloadPaths[i] = mapped
-	}
+	committed = true
 	return nil
 }
 
@@ -555,6 +688,42 @@ func stagedArtifactSiblingName(sourceName, targetName, siblingName string) strin
 		}
 	}
 	return siblingName
+}
+
+func (s *artifactStage) treeDestinations(skipFile, skipDir, stagedArtifactDir, finalArtifactDir string) ([]string, error) {
+	paths := make([]string, 0)
+	if _, err := s.fs.Stat(s.root); os.IsNotExist(err) {
+		return paths, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("inspect staged artifact root: %w", err)
+	}
+	if err := afero.Walk(s.fs, s.root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		clean := filepath.Clean(path)
+		if skipFile != "" && clean == filepath.Clean(skipFile) {
+			return nil
+		}
+		if skipDir != "" && strings.HasPrefix(clean, filepath.Clean(skipDir)+string(filepath.Separator)) {
+			return nil
+		}
+		target, mapErr := s.publicationPath(path, stagedArtifactDir, finalArtifactDir)
+		if mapErr != nil {
+			return mapErr
+		}
+		if filepath.Clean(path) != filepath.Clean(target) {
+			paths = append(paths, target)
+		}
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("preflight staged artifacts: %w", err)
+	}
+	sort.Strings(paths)
+	return paths, nil
 }
 
 func (s *artifactStage) installTree(skipFile, skipDir string, preserve []string, stagedArtifactDir, finalArtifactDir string) (bool, error) {
@@ -664,13 +833,22 @@ func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir
 		if err := s.fs.MkdirAll(filepath.Dir(plan.target), 0o755); err != nil {
 			return false, fmt.Errorf("create artifact destination: %w", err)
 		}
-		if plan.replace {
+		if s.publishBatch != nil {
+			if _, err := s.publishBatch.BeforePublish(s.publishCtx, plan.target, plan.replace); err != nil {
+				return false, err
+			}
+		} else if plan.replace {
 			if removeErr := s.fs.Remove(plan.target); removeErr != nil {
 				return false, fmt.Errorf("replace artifact destination %s: %w", plan.target, removeErr)
 			}
 		}
 		if err := s.fs.Rename(plan.source, plan.target); err != nil {
 			return false, fmt.Errorf("publish staged artifact %s: %w", plan.target, err)
+		}
+		if s.publishBatch != nil {
+			if err := s.publishBatch.ConfirmPublish(s.publishCtx, plan.target); err != nil {
+				return false, err
+			}
 		}
 	}
 	return preserved, nil

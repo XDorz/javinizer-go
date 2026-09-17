@@ -169,6 +169,7 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 		targetDir:      targetDir,
 		finalDir:       targetDir,
 		artifact:       artifact,
+		operationID:    opID,
 		organizeResult: nil,
 		merged:         false,
 		foundNFOPath:   "",
@@ -305,7 +306,8 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 		}
 		if err := artifact.publish(ctx, o, state, &steps); err != nil {
 			markArtifactDirty(artifact.original)
-			o.completeRevertLogWithState(ctx, opID, state, true)
+			prePublication := !artifact.sourceCleanupArmed
+			o.completeRevertLogWithState(ctx, opID, state, prePublication)
 			return &ApplyResult{
 				OrganizeResult: state.organizeResult,
 				Movie:          state.movie,
@@ -314,7 +316,7 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 				OperationID:    opID,
 				Steps:          steps,
 				FailedStep:     "artifact_publication",
-				PrePublication: true,
+				PrePublication: prePublication,
 			}, fmt.Errorf("artifact publication failed: %w", err)
 		}
 	}
@@ -632,6 +634,7 @@ type applyPipelineState struct {
 	nfoPath          string
 	scrapedMediaURLs *scrapedMediaSnapshot
 	artifact         *artifactStage
+	operationID      OperationID
 }
 
 // completeRevertLogWithState marks an in-progress revert operation as failed,
@@ -641,22 +644,27 @@ type applyPipelineState struct {
 // moved file. Per CONTEXT.md: called on error paths to prevent orphaned
 // RevertStatusApplied records while keeping revert actionable.
 func (o *applyOrchImpl) completeRevertLogWithState(ctx context.Context, opID OperationID, state *applyPipelineState, prePublication bool) {
-	if o.revertLog != nil && opID != "" {
-		partial := &ApplyResult{
-			OrganizeResult: state.organizeResult,
-			Movie:          state.movie,
-			DownloadPaths:  state.downloadPaths,
-			NFOPath:        state.nfoPath,
-			FoundNFOPath:   state.foundNFOPath,
-			Merged:         state.merged,
-			OperationID:    opID,
-			Steps:          stepCompletion{},
-			PrePublication: prePublication,
-		}
-		if completeErr := o.revertLog.CompleteFailed(ctx, opID, partial); completeErr != nil {
-			resolveLogger(o.logger).Warnf("[workflow] RevertLog.CompleteFailed error for %s: %v", opID, completeErr)
-		}
+	if err := o.completeRevertLogWithStateErr(ctx, opID, state, prePublication); err != nil {
+		resolveLogger(o.logger).Warnf("[workflow] RevertLog.CompleteFailed error for %s: %v", opID, err)
 	}
+}
+
+func (o *applyOrchImpl) completeRevertLogWithStateErr(ctx context.Context, opID OperationID, state *applyPipelineState, prePublication bool) error {
+	if o.revertLog == nil || opID == "" {
+		return nil
+	}
+	partial := &ApplyResult{
+		OrganizeResult: state.organizeResult,
+		Movie:          state.movie,
+		DownloadPaths:  state.downloadPaths,
+		NFOPath:        state.nfoPath,
+		FoundNFOPath:   state.foundNFOPath,
+		Merged:         state.merged,
+		OperationID:    opID,
+		Steps:          stepCompletion{},
+		PrePublication: prePublication,
+	}
+	return o.revertLog.CompleteFailed(ctx, opID, partial)
 }
 
 // beginRevertLog starts a revert log entry before filesystem mutation.

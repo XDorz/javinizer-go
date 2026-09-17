@@ -146,7 +146,10 @@ func TestPR260ArtifactStagingRenameFailureRetainsSourceAfterPartialPublish(t *te
 
 type pr260RenameFailureFs struct{ afero.Fs }
 
-func (f *pr260RenameFailureFs) Rename(_, _ string) error {
+func (f *pr260RenameFailureFs) Rename(oldname, newname string) error {
+	if strings.Contains(oldname, ".dlbusy") || strings.Contains(newname, ".dlbusy") {
+		return f.Fs.Rename(oldname, newname)
+	}
 	return errors.New("pr260: artifact install rename denied")
 }
 

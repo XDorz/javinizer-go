@@ -61,7 +61,7 @@ func TestPR260ExactPostOrganizeFaultLeavesPublishedVideoAndInputs(t *testing.T) 
 			pr260AssertRetained(t, base, source, sub, part, other)
 			entries, e := afero.ReadDir(base, dest)
 			require.NoError(t, e)
-			require.NotEmpty(t, entries, "post-video fault leaves safe published output")
+			require.Empty(t, entries, "post-video fault rolls back the published output atomically")
 			fs.enabled = false
 			stage.cleanup()
 			pr260AssertStageGone(t, base, root)

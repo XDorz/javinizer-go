@@ -42,7 +42,7 @@ func TestPR260ExactMissingStagedSidecarAfterRealInPlacePlanRetainsOriginals(t *t
 	require.NoError(t, err)
 	state := &applyPipelineState{organizeResult: &organizer.OrganizeResult{NewPath: stage.stagedSource, InPlaceRenamed: true}}
 	err = stage.publish(context.Background(), orch, state, nil)
-	require.ErrorContains(t, err, "inspect staged publication sidecar")
+	require.ErrorContains(t, err, "requires an armed durable recorder")
 	pr260AssertRetained(t, base, source, sub, part, other)
 	stage.cleanup()
 	pr260AssertStageGone(t, base, root)
