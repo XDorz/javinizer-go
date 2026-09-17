@@ -292,7 +292,7 @@ func TestImportUpsertMatchesByExistingIDBeforeName(t *testing.T) {
 	require.Equal(t, "Name", stored.LastName)
 }
 
-func TestImportUpsertLeavesAmbiguousDMMBackedCandidatesUnmatched(t *testing.T) {
+func TestImportUpsertRejectsAmbiguousDMMBackedCandidates(t *testing.T) {
 	db := newCreditTestDB(t)
 	repo := NewActressRepository(db)
 	for _, dmmID := range []int{987651, 987652} {
@@ -307,27 +307,17 @@ func TestImportUpsertLeavesAmbiguousDMMBackedCandidatesUnmatched(t *testing.T) {
 	}
 
 	incoming := models.Actress{FirstName: "Same", LastName: "Candidate"}
-	require.NoError(t, repo.ImportUpsert(context.Background(), &incoming))
-	require.NotEqual(t, 0, incoming.ID)
-	require.NotEqual(t, 987651, incoming.DMMID)
-	require.True(t, incoming.Verified)
+	require.ErrorContains(t, repo.ImportUpsert(context.Background(), &incoming), "ambiguous import match")
+	require.Zero(t, incoming.ID)
 	var count int64
-	require.NoError(t, db.Model(&models.Actress{}).Where("verified = ?", true).Count(&count).Error)
-	require.EqualValues(t, 1, count)
-}
-
-func TestFindDMMCandidateByExactNameQueryError(t *testing.T) {
-	db := newCreditTestDB(t)
-	repo := NewActressRepository(db)
-	injectDatabaseCallbackError(t, db, "query", "actresses", 1)
-	_, err := repo.findDMMCandidateByExactName(context.Background(), &models.Actress{FirstName: "Name", LastName: "Candidate"})
-	require.Error(t, err)
+	require.NoError(t, db.Model(&models.Actress{}).Count(&count).Error)
+	require.EqualValues(t, 2, count)
 }
 
 func TestFindImportMatchDMMCandidateLookupError(t *testing.T) {
 	db := newCreditTestDB(t)
 	repo := NewActressRepository(db)
-	injectDatabaseCallbackError(t, db, "query", "actresses", 3)
+	injectDatabaseCallbackError(t, db, "query", "actresses", 1)
 	_, err := repo.findImportMatch(context.Background(), &models.Actress{FirstName: "Name", LastName: "Candidate"})
 	require.Error(t, err)
 }
@@ -407,7 +397,7 @@ func TestImportUpsertPreservesDMMIDForProtectedIdentity(t *testing.T) {
 func TestImportUpsertCandidateLookupError(t *testing.T) {
 	db := newCreditTestDB(t)
 	repo := NewActressRepository(db)
-	injectDatabaseCallbackError(t, db, "query", "actresses", 2)
+	injectDatabaseCallbackError(t, db, "query", "actresses", 1)
 	incoming := models.Actress{FirstName: "Candidate", LastName: "Only"}
 	require.Error(t, repo.ImportUpsert(context.Background(), &incoming))
 }

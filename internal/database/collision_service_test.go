@@ -728,6 +728,14 @@ func TestCollisionServiceReassignRejectsInvalidTarget(t *testing.T) {
 	}
 }
 
+func TestCollisionServiceReassignRejectsCurrentIdentity(t *testing.T) {
+	db, service, credit, collision := collisionFixture(t)
+	_, err := service.Resolve(t.Context(), collision.ID, models.CollisionResolutionReassign, credit.ActressID)
+	require.ErrorContains(t, err, "already linked")
+	require.NoError(t, db.First(&collision, collision.ID).Error)
+	require.Equal(t, models.CollisionStatusOpen, collision.Status)
+}
+
 func TestReassignCreditReturnsLookupError(t *testing.T) {
 	db := newCreditTestDB(t)
 	require.NoError(t, db.Close())

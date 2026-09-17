@@ -181,19 +181,24 @@ test('PR260 browser resolve then save and reload preserves canonical cast', asyn
 	expect(browserMovie?.code, JSON.stringify(browserMovie)).toBe(targetID);
 	await expect(page.getByText('Collisions — organize is blocked until resolved')).toBeVisible();
 
+	await page.getByRole('button', { name: 'Relink', exact: true }).click();
+	const chooser = page.getByRole('dialog', { name: 'Choose verified actress to relink' });
+	await expect(chooser).toBeVisible();
+	const searchInput = chooser.getByRole('textbox', { name: 'Search verified actresses' });
+	await searchInput.fill(`PR260${runTag}`);
+	await chooser.getByRole('button', { name: 'Search', exact: true }).click();
+	const targetOption = chooser.getByRole('button', {
+		name: new RegExp(`#${relinkTarget.id}$`),
+	});
+	await expect(targetOption).toContainText(`Relinked PR260${runTag}`);
+	await targetOption.click();
 	const resolveResponsePromise = page.waitForResponse(
 		(response) =>
 			response.request().method() === 'POST' &&
 			response.url().includes('/actresses/collisions/') &&
 			response.url().endsWith('/resolve'),
 	);
-	const dialogPromise = page.waitForEvent('dialog');
-	const relinkClickPromise = page.getByRole('button', { name: 'Relink', exact: true }).click();
-	const dialog = await dialogPromise;
-	expect(dialog.type()).toBe('prompt');
-	expect(dialog.message()).toContain('Target actress ID');
-	await dialog.accept(String(relinkTarget.id));
-	await relinkClickPromise;
+	await chooser.getByRole('button', { name: 'Confirm relink' }).click();
 	const resolveResponse = await resolveResponsePromise;
 	expect(resolveResponse.ok(), await resolveResponse.text()).toBe(true);
 	await expect(page.getByRole('button', { name: 'Relink', exact: true })).toHaveCount(0, {

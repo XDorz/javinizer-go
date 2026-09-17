@@ -87,8 +87,8 @@ func TestActressAliasRepository(t *testing.T) {
 
 		// Should contain all aliases created in previous tests
 		assert.GreaterOrEqual(t, len(aliasMap), 3)
-		assert.Equal(t, "Hatano Yui", aliasMap["Yui Hatano"])
-		assert.Equal(t, "Amamiya Jun", aliasMap["Jun Amamiya"])
+		assert.Equal(t, "Hatano Yui", aliasMap["yui hatano"])
+		assert.Equal(t, "Amamiya Jun", aliasMap["jun amamiya"])
 	})
 
 	t.Run("Delete", func(t *testing.T) {

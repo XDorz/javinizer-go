@@ -663,6 +663,7 @@ export interface CreditCollision {
 	status: 'open' | 'resolved';
 	resolution?: string;
 	occurrences: number;
+	current_actress_id: number;
 	sources_seen?: string;
 	user_pinned?: boolean;
 	last_seen_at?: string;

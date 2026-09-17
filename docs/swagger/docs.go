@@ -8940,6 +8940,9 @@ const docTemplate = `{
                 "credit_id": {
                     "type": "integer"
                 },
+                "current_actress_id": {
+                    "type": "integer"
+                },
                 "field": {
                     "type": "string"
                 },

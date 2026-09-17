@@ -9,7 +9,6 @@ import (
 
 	"github.com/javinizer/javinizer-go/internal/models"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // MergeResolution values select which side of an actress merge a field conflict resolves to.
@@ -228,11 +227,11 @@ func moveCredits(tx *gorm.DB, sourceID, targetID uint) error {
 	return nil
 }
 
-// upsertActressAliases creates or updates actress alias records.
-// Uses ON CONFLICT to handle duplicates. Uses the provided transaction.
+// upsertActressAliases creates or updates actress alias records through the
+// normalized ownership guard. Uses the provided transaction.
 func upsertActressAliases(tx *gorm.DB, aliases []string, canonicalName string) error {
 	canonicalName = strings.TrimSpace(canonicalName)
-	canonicalKey := strings.ToLower(canonicalName)
+	canonicalKey := models.NormalizeActressNameKey(canonicalName)
 	if canonicalName == "" {
 		return nil
 	}
@@ -240,7 +239,7 @@ func upsertActressAliases(tx *gorm.DB, aliases []string, canonicalName string) e
 	seen := make(map[string]bool)
 	for _, alias := range aliases {
 		alias = strings.TrimSpace(alias)
-		key := strings.ToLower(alias)
+		key := models.NormalizeActressNameKey(alias)
 		if alias == "" || key == canonicalKey || seen[key] {
 			continue
 		}
@@ -250,10 +249,7 @@ func upsertActressAliases(tx *gorm.DB, aliases []string, canonicalName string) e
 			AliasName:     alias,
 			CanonicalName: canonicalName,
 		}
-		if err := tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "alias_name"}},
-			DoUpdates: clause.AssignmentColumns([]string{"canonical_name", colUpdatedAt}),
-		}).Create(&entry).Error; err != nil {
+		if err := updateNormalizedActressAliasesTx(tx, &entry); err != nil {
 			return err
 		}
 	}

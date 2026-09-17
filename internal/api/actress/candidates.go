@@ -23,6 +23,7 @@ type candidateListResponse struct {
 type collisionResponse struct {
 	models.CreditCollision
 	AllowedResolutions []string `json:"allowed_resolutions"`
+	CurrentActressID   uint     `json:"current_actress_id"`
 }
 
 type collisionListResponse struct {
@@ -209,14 +210,19 @@ func ListCollisions(deps ActressDeps) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: databaseNotConfiguredError})
 			return
 		}
-		allowed, err := database.NewCollisionService(deps.DB).AllowedResolutions(c.Request.Context(), collisions)
+		actionContexts, err := database.NewCollisionService(deps.DB).ActionContexts(c.Request.Context(), collisions)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 		response := make([]collisionResponse, 0, len(collisions))
 		for i := range collisions {
-			response = append(response, collisionResponse{CreditCollision: collisions[i], AllowedResolutions: allowed[collisions[i].ID]})
+			actionContext := actionContexts[collisions[i].ID]
+			response = append(response, collisionResponse{
+				CreditCollision:    collisions[i],
+				AllowedResolutions: actionContext.AllowedResolutions,
+				CurrentActressID:   actionContext.CurrentActressID,
+			})
 		}
 		c.JSON(http.StatusOK, collisionListResponse{Collisions: response})
 	}

@@ -900,7 +900,7 @@ func TestActressAliasRepository_GetAliasMap_Uncovered(t *testing.T) {
 
 	aliasMap, err := repo.GetAliasMap(context.TODO())
 	require.NoError(t, err)
-	assert.Equal(t, "MapCanon", aliasMap["MapAlias"])
+	assert.Equal(t, "MapCanon", aliasMap["mapalias"])
 }
 
 // --- base_repository.go uncovered ---

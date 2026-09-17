@@ -30,6 +30,11 @@ export class ActressClient extends BaseClient {
 		return this.request<ActressListResponse>(`/api/v1/actresses${query}`);
 	}
 
+	async searchActresses(query: string): Promise<Actress[]> {
+		const params = new URLSearchParams({ q: query });
+		return this.request<Actress[]>(`/api/v1/actresses/search?${params}`);
+	}
+
 	async getActress(id: number): Promise<Actress> {
 		return this.request<Actress>(`/api/v1/actresses/${id}`);
 	}

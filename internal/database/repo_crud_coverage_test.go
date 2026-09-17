@@ -150,8 +150,8 @@ func TestRepoCRUD_ActressAlias_GetAliasMap(t *testing.T) {
 
 	m, err := repo.GetAliasMap(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, "CanonicalA", m["MapA"])
-	assert.Equal(t, "CanonicalB", m["MapB"])
+	assert.Equal(t, "CanonicalA", m["mapa"])
+	assert.Equal(t, "CanonicalB", m["mapb"])
 }
 
 // ============================================================================

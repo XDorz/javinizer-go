@@ -854,8 +854,14 @@ func resolvedDMMIDFromCredit(credit *models.MovieCredit) int {
 }
 
 func aliasMatchesCanonicalTx(tx *gorm.DB, aliasName string, resolved *models.Actress) (bool, error) {
-	var aliases []models.ActressAlias
-	if err := tx.Where("alias_name = ?", aliasName).Find(&aliases).Error; err != nil {
+	if models.NormalizeActressNameKey(aliasName) == "" {
+		return false, nil
+	}
+	aliases, err := normalizedActressAliasesTx(tx, aliasName)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	if err != nil {
 		return false, wrapDBErr("find", fmt.Sprintf("actress alias %s", aliasName), err)
 	}
 	canonicalNames := []string{
@@ -864,16 +870,22 @@ func aliasMatchesCanonicalTx(tx *gorm.DB, aliasName string, resolved *models.Act
 		resolved.LastName + " " + resolved.FirstName,
 		resolved.FirstName + " " + resolved.LastName,
 	}
+	matched := len(aliases) > 0
 	for _, alias := range aliases {
+		ownedByResolved := false
 		aliasKey := models.NormalizeActressNameKey(alias.CanonicalName)
 		for _, canonical := range canonicalNames {
 			canonicalKey := models.NormalizeActressNameKey(canonical)
 			if aliasKey != "" && canonicalKey != "" && aliasKey == canonicalKey {
-				return true, nil
+				ownedByResolved = true
+				break
 			}
 		}
+		if !ownedByResolved {
+			return false, nil
+		}
 	}
-	return false, nil
+	return matched, nil
 }
 
 func (u *MovieUpserter) recordFieldCollisionsTx(tx *gorm.DB, collisionRepo *CreditCollisionRepository, aliasRepo *ActressAliasRepository, credit *models.MovieCredit, resolved *models.Actress, policy CollisionPolicy, trusted map[string]bool) error {

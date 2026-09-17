@@ -48,28 +48,31 @@ func findVerifiedByDMMIDTx(tx *gorm.DB, dmmID int) (*models.Actress, error) {
 
 func findVerifiedByAliasTx(tx *gorm.DB, japaneseName, firstName, lastName string) ([]models.Actress, error) {
 	lookups := make([]string, 0, 3)
-	if ja := strings.TrimSpace(japaneseName); ja != "" {
+	if ja := models.NormalizeActressNameKey(japaneseName); ja != "" {
 		lookups = append(lookups, ja)
 	}
 	if firstName != "" && lastName != "" {
 		lookups = append(lookups,
-			strings.TrimSpace(firstName+" "+lastName),
-			strings.TrimSpace(lastName+" "+firstName),
+			models.NormalizeActressNameKey(firstName+" "+lastName),
+			models.NormalizeActressNameKey(lastName+" "+firstName),
 		)
-	} else if first := strings.TrimSpace(firstName); first != "" {
+	} else if first := models.NormalizeActressNameKey(firstName); first != "" {
 		lookups = append(lookups, first)
-	} else if last := strings.TrimSpace(lastName); last != "" {
+	} else if last := models.NormalizeActressNameKey(lastName); last != "" {
 		lookups = append(lookups, last)
 	}
 	if len(lookups) == 0 {
 		return nil, nil
 	}
 	var aliases []models.ActressAlias
-	if err := tx.Where("alias_name IN ?", lookups).Find(&aliases).Error; err != nil {
+	if err := tx.Where("alias_name_key IN ?", lookups).Find(&aliases).Error; err != nil {
 		return nil, err
 	}
 	if len(aliases) == 0 {
 		return nil, nil
+	}
+	if err := validateNormalizedAliasRows(aliases); err != nil {
+		return nil, err
 	}
 	matched := make([]models.Actress, 0, len(aliases))
 	seenIDs := make(map[uint]struct{}, len(aliases))

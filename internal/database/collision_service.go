@@ -57,8 +57,13 @@ func validateCollisionResolution(collision *models.CreditCollision, credit *mode
 	allowed := AllowedCollisionResolutions(collision, credit)
 	for _, candidate := range allowed {
 		if candidate == resolution {
-			if resolution == models.CollisionResolutionReassign && targetActressID == 0 {
-				return fmt.Errorf("resolve collision: target_actress_id is required for reassign")
+			if resolution == models.CollisionResolutionReassign {
+				if targetActressID == 0 {
+					return fmt.Errorf("resolve collision: target_actress_id is required for reassign")
+				}
+				if targetActressID == credit.ActressID {
+					return fmt.Errorf("resolve collision: credit already linked to target identity")
+				}
 			}
 			return nil
 		}
@@ -72,10 +77,15 @@ func validateCollisionResolution(collision *models.CreditCollision, credit *mode
 	return fmt.Errorf("resolve collision: resolution %q is not allowed for this collision", resolution)
 }
 
-// AllowedResolutions derives action contracts for collisions using the linked
-// actress state loaded from the server; callers must not trust client claims.
-func (s *CollisionService) AllowedResolutions(ctx context.Context, collisions []models.CreditCollision) (map[uint][]string, error) {
-	result := make(map[uint][]string, len(collisions))
+// CollisionActionContext is the server-derived action and current-identity state for a collision.
+type CollisionActionContext struct {
+	AllowedResolutions []string
+	CurrentActressID   uint
+}
+
+// ActionContexts derives action contracts using linked identity state loaded from the server.
+func (s *CollisionService) ActionContexts(ctx context.Context, collisions []models.CreditCollision) (map[uint]CollisionActionContext, error) {
+	result := make(map[uint]CollisionActionContext, len(collisions))
 	if len(collisions) == 0 {
 		return result, nil
 	}
@@ -96,7 +106,23 @@ func (s *CollisionService) AllowedResolutions(ctx context.Context, collisions []
 		if credit == nil {
 			return nil, fmt.Errorf("load collision credit %d: %w", collisions[i].CreditID, ErrNotFound)
 		}
-		result[collisions[i].ID] = AllowedCollisionResolutions(&collisions[i], credit)
+		result[collisions[i].ID] = CollisionActionContext{
+			AllowedResolutions: AllowedCollisionResolutions(&collisions[i], credit),
+			CurrentActressID:   credit.ActressID,
+		}
+	}
+	return result, nil
+}
+
+// AllowedResolutions preserves the policy-only service contract.
+func (s *CollisionService) AllowedResolutions(ctx context.Context, collisions []models.CreditCollision) (map[uint][]string, error) {
+	contexts, err := s.ActionContexts(ctx, collisions)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[uint][]string, len(contexts))
+	for id, actionContext := range contexts {
+		result[id] = actionContext.AllowedResolutions
 	}
 	return result, nil
 }
@@ -209,9 +235,6 @@ func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution s
 			return 0, err
 		}
 	case models.CollisionResolutionReassign:
-		if targetActressID == credit.ActressID {
-			return 0, fmt.Errorf("resolve collision: credit already linked to target identity")
-		}
 		if err := reassignCreditTx(tx, creditPtr, targetActressID); err != nil {
 			return 0, err
 		}
@@ -590,14 +613,10 @@ func transitionActressCanonicalNamesTx(tx *gorm.DB, actressID uint, previous *mo
 		if _, unchanged := currentKeys[key]; unchanged {
 			continue
 		}
-		if err := tx.Model(&models.ActressAlias{}).Where("canonical_name = ?", oldName).Updates(map[string]interface{}{
-			colCanonicalName: newCanonical,
-			colUpdatedAt:     time.Now().UTC(),
-		}).Error; err != nil {
+		if err := retargetNormalizedCanonicalAliasesTx(tx, oldName, newCanonical); err != nil {
 			return wrapDBErr("retarget", fmt.Sprintf("actress aliases for %d", actressID), err)
 		}
-		var existing models.ActressAlias
-		err := tx.First(&existing, "alias_name = ?", oldName).Error
+		existing, err := normalizedActressAliasesTx(tx, oldName)
 		switch {
 		case errors.Is(err, gorm.ErrRecordNotFound):
 			if err := tx.Create(&models.ActressAlias{AliasName: oldName, CanonicalName: newCanonical}).Error; err != nil {
@@ -606,9 +625,9 @@ func transitionActressCanonicalNamesTx(tx *gorm.DB, actressID uint, previous *mo
 		case err != nil:
 			return wrapDBErr("find", fmt.Sprintf("actress alias %s", oldName), err)
 		default:
-			if _, owned := previousKeys[models.NormalizeActressNameKey(existing.CanonicalName)]; owned {
-				if err := tx.Model(&existing).Updates(map[string]interface{}{colCanonicalName: newCanonical, colUpdatedAt: time.Now().UTC()}).Error; err != nil {
-					return wrapDBErr("update", fmt.Sprintf("actress alias %s", oldName), err)
+			if _, owned := previousKeys[models.NormalizeActressNameKey(existing[0].CanonicalName)]; owned {
+				if err := updateNormalizedActressAliasesTx(tx, &models.ActressAlias{AliasName: oldName, CanonicalName: newCanonical}); err != nil {
+					return err
 				}
 			}
 		}
@@ -628,37 +647,14 @@ func retargetActressAliasesTx(tx *gorm.DB, actressID uint, oldCanonicalName stri
 	if strings.TrimSpace(newCanonicalName) == "" || oldCanonicalName == newCanonicalName {
 		return nil
 	}
-	if err := tx.Model(&models.ActressAlias{}).Where("canonical_name = ?", oldCanonicalName).Updates(map[string]interface{}{
-		colCanonicalName: newCanonicalName,
-		colUpdatedAt:     time.Now().UTC(),
-	}).Error; err != nil {
+	if err := retargetNormalizedCanonicalAliasesTx(tx, oldCanonicalName, newCanonicalName); err != nil {
 		return wrapDBErr("retarget", fmt.Sprintf("actress aliases for %d", actressID), err)
 	}
 	return nil
 }
 
 func upsertAliasTx(tx *gorm.DB, alias *models.ActressAlias) error {
-	var existing models.ActressAlias
-	err := tx.First(&existing, "alias_name = ?", alias.AliasName).Error
-	if err == nil {
-		alias.ID = existing.ID
-		alias.CreatedAt = existing.CreatedAt
-		if err := tx.Model(&existing).Updates(map[string]interface{}{
-			colCanonicalName: alias.CanonicalName,
-			colUpdatedAt:     time.Now().UTC(),
-		}).Error; err != nil {
-			return wrapDBErr("update", fmt.Sprintf("actress alias %s", alias.AliasName), err)
-		}
-		alias.ID = existing.ID
-		return nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return wrapDBErr("find", fmt.Sprintf("actress alias %s", alias.AliasName), err)
-	}
-	if err := tx.Create(alias).Error; err != nil {
-		return wrapDBErr("create", fmt.Sprintf("actress alias %s", alias.AliasName), err)
-	}
-	return nil
+	return updateNormalizedActressAliasesTx(tx, alias)
 }
 
 func reassignLegacyActressTx(tx *gorm.DB, movieContentID string, sourceActressID, targetActressID uint, suppressed bool) error {

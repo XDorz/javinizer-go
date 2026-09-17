@@ -95,8 +95,8 @@ func TestMiss3_ActressAliasGetAliasMap(t *testing.T) {
 
 	m, err := repo.GetAliasMap(context.TODO())
 	require.NoError(t, err)
-	assert.Equal(t, "CanonX", m["AliasX"])
-	assert.Equal(t, "CanonY", m["AliasY"])
+	assert.Equal(t, "CanonX", m["aliasx"])
+	assert.Equal(t, "CanonY", m["aliasy"])
 }
 
 // =====================================================================

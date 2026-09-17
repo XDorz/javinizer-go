@@ -172,13 +172,15 @@ func TestCollisionEndpointsExposeAndEnforceAllowedResolutions(t *testing.T) {
 	require.Equal(t, http.StatusOK, list.Code)
 	var response struct {
 		Collisions []struct {
-			ID      uint     `json:"id"`
-			Allowed []string `json:"allowed_resolutions"`
+			ID               uint     `json:"id"`
+			Allowed          []string `json:"allowed_resolutions"`
+			CurrentActressID uint     `json:"current_actress_id"`
 		} `json:"collisions"`
 	}
 	require.NoError(t, json.Unmarshal(list.Body.Bytes(), &response))
 	require.Len(t, response.Collisions, 1)
 	require.ElementsMatch(t, []string{models.CollisionResolutionAdoptCanonical, models.CollisionResolutionReassign}, response.Collisions[0].Allowed)
+	require.Equal(t, candidate.ID, response.Collisions[0].CurrentActressID)
 
 	body, err := json.Marshal(map[string]string{"resolution": models.CollisionResolutionKeepIdentity})
 	require.NoError(t, err)

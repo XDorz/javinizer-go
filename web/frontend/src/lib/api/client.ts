@@ -240,6 +240,9 @@ class APIClient {
 	async listActresses(params?: Parameters<ActressClient['listActresses']>[0]) {
 		return this.actresses.listActresses(params);
 	}
+	async searchActresses(query: string) {
+		return this.actresses.searchActresses(query);
+	}
 	async getActress(id: number) {
 		return this.actresses.getActress(id);
 	}

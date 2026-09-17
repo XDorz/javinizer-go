@@ -4,6 +4,8 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // ---------------------------------------------------------------------------
@@ -255,11 +257,20 @@ func IsValidMatchMode(mode string) bool {
 // ActressAlias represents an alternate name mapping for an actress
 // This allows users to consolidate multiple actress names into a canonical one
 type ActressAlias struct {
-	ID            uint      `json:"id" gorm:"primaryKey"`
-	AliasName     string    `json:"alias_name" gorm:"uniqueIndex;not null"` // The alternate name (e.g., "Yui Hatano")
-	CanonicalName string    `json:"canonical_name" gorm:"index;not null"`   // The canonical/preferred name (e.g., "Hatano Yui")
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID               uint      `json:"id" gorm:"primaryKey"`
+	AliasName        string    `json:"alias_name" gorm:"uniqueIndex;not null"` // The alternate name (e.g., "Yui Hatano")
+	AliasNameKey     string    `json:"-" gorm:"index;not null;default:''"`
+	CanonicalName    string    `json:"canonical_name" gorm:"index;not null"` // The canonical/preferred name (e.g., "Hatano Yui")
+	CanonicalNameKey string    `json:"-" gorm:"index;not null;default:''"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+// BeforeSave keeps the indexed alias lookup key aligned for every GORM write path.
+func (a *ActressAlias) BeforeSave(_ *gorm.DB) error {
+	a.AliasNameKey = NormalizeActressNameKey(a.AliasName)
+	a.CanonicalNameKey = NormalizeActressNameKey(a.CanonicalName)
+	return nil
 }
 
 // MovieTag represents a custom user-defined tag for a specific movie

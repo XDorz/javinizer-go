@@ -412,30 +412,24 @@ func (r *ActressRepository) FindVerifiedByDMMID(ctx context.Context, dmmID int) 
 // FindVerifiedByAlias resolves an alias to its verified identity via the
 // alias table and canonical-name matching.
 func (r *ActressRepository) FindVerifiedByAlias(ctx context.Context, aliasName string) (*models.Actress, error) {
-	var alias models.ActressAlias
-	err := r.GetDB().WithContext(ctx).First(&alias, "alias_name = ?", aliasName).Error
+	aliases, err := normalizedActressAliasesTx(r.GetDB().WithContext(ctx), aliasName)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("find alias %s: %w", aliasName, ErrNotFound)
 		}
 		return nil, wrapDBErr("find", fmt.Sprintf("alias %s", aliasName), err)
 	}
-	key := models.NormalizeActressNameKey(alias.CanonicalName)
-	if key == "" {
-		return nil, fmt.Errorf("find alias %s: %w", aliasName, ErrNotFound)
-	}
-	var found models.Actress
-	err = r.GetDB().WithContext(ctx).Where(
-		"verified = ? AND (LOWER(TRIM(japanese_name)) = ? OR LOWER(TRIM(last_name || ' ' || first_name)) = ? OR LOWER(TRIM(first_name || ' ' || last_name)) = ?)",
-		true, key, key, key,
-	).First(&found).Error
+	found, err := r.FindVerifiedByExactName(ctx, aliases[0].CanonicalName, "", "")
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("find verified actress for alias %s: %w", aliasName, ErrNotFound)
-		}
-		return nil, wrapDBErr("find", fmt.Sprintf("verified actress for alias %s", aliasName), err)
+		return nil, err
 	}
-	return &found, nil
+	if len(found) == 0 {
+		return nil, fmt.Errorf("find verified actress for alias %s: %w", aliasName, ErrNotFound)
+	}
+	if len(found) > 1 {
+		return nil, fmt.Errorf("find verified actress for alias %s: %w", aliasName, ErrActressAliasAmbiguous)
+	}
+	return &found[0], nil
 }
 
 // FindVerifiedByExactName returns verified identities matching the given
@@ -669,83 +663,62 @@ func (r *ActressRepository) findImportMatch(ctx context.Context, incoming *model
 			return nil, wrapDBErr("find", fmt.Sprintf("import match dmm %d", incoming.DMMID), err)
 		}
 	}
-	matches, err := r.FindVerifiedByExactName(ctx, incoming.JapaneseName, incoming.FirstName, incoming.LastName)
+	matches, err := r.findImportMatchesByCanonicalUnion(ctx, incoming)
 	if err != nil {
 		return nil, err
 	}
-	if incoming.DMMID > 0 {
-		dmmLessMatches := make([]models.Actress, 0, len(matches))
-		for i := range matches {
-			if matches[i].DMMID <= 0 {
-				dmmLessMatches = append(dmmLessMatches, matches[i])
-			}
-		}
-		matches = dmmLessMatches
-	}
 	if len(matches) > 1 {
-		return nil, fmt.Errorf("ambiguous import match for %s: %d verified identities share the exact name", incoming.FullName(), len(matches))
+		return nil, fmt.Errorf("ambiguous import match for %s: %d identities share a canonical representation", incoming.FullName(), len(matches))
 	}
 	if len(matches) == 1 {
 		return &matches[0], nil
 	}
-	candidate, candidateErr := findCandidateByNameKeyTx(r.GetDB().WithContext(ctx), actressNameKey(incoming))
-	if candidateErr == nil {
-		if incoming.DMMID == 0 || candidate.DMMID == 0 || candidate.DMMID == incoming.DMMID {
-			return candidate, nil
-		}
-	} else if !errors.Is(candidateErr, gorm.ErrRecordNotFound) {
-		return nil, wrapDBErr("find", fmt.Sprintf("import candidate %s", incoming.FullName()), candidateErr)
-	}
-	if actressNameKey(incoming) == "" {
-		return nil, nil
-	}
-	candidate, candidateErr = r.findDMMCandidateByExactName(ctx, incoming)
-	if candidateErr != nil {
-		return nil, candidateErr
-	}
-	return candidate, nil
+	return nil, nil
 }
 
-func (r *ActressRepository) findDMMCandidateByExactName(ctx context.Context, incoming *models.Actress) (*models.Actress, error) {
-	var candidates []models.Actress
-	if err := r.GetDB().WithContext(ctx).
-		Where("verified = ? AND dmm_id > ?", false, 0).
-		Find(&candidates).Error; err != nil {
-		return nil, wrapDBErr("find", fmt.Sprintf("DMM import candidate %s", incoming.FullName()), err)
-	}
-	matches := make([]models.Actress, 0, len(candidates))
-	for i := range candidates {
-		if incoming.DMMID > 0 && candidates[i].DMMID != incoming.DMMID {
-			continue
-		}
-		if exactActressNamesMatch(incoming, &candidates[i]) {
-			matches = append(matches, candidates[i])
-		}
-	}
-	if len(matches) != 1 {
+func (r *ActressRepository) findImportMatchesByCanonicalUnion(ctx context.Context, incoming *models.Actress) ([]models.Actress, error) {
+	incomingKeys := canonicalActressRepresentationKeys(incoming)
+	if len(incomingKeys) == 0 {
 		return nil, nil
 	}
-	return &matches[0], nil
+	query := r.GetDB().WithContext(ctx)
+	// Exact positive-DMM ownership is handled before this fallback. A different
+	// positive DMM identity must never be claimed by a name-only match.
+	if incoming.DMMID > 0 {
+		query = query.Where("dmm_id = ?", 0)
+	}
+	var actresses []models.Actress
+	if err := query.Find(&actresses).Error; err != nil {
+		return nil, wrapDBErr("find", fmt.Sprintf("import canonical union %s", incoming.FullName()), err)
+	}
+	matches := make([]models.Actress, 0, 2)
+	for i := range actresses {
+		if exactActressNamesMatch(incoming, &actresses[i]) {
+			matches = append(matches, actresses[i])
+		}
+	}
+	return matches, nil
+}
+
+func canonicalActressRepresentationKeys(actress *models.Actress) map[string]struct{} {
+	keys := make(map[string]struct{})
+	for _, representation := range canonicalActressRepresentations(actress) {
+		if key := models.NormalizeActressNameKey(representation); key != "" {
+			keys[key] = struct{}{}
+		}
+	}
+	return keys
 }
 
 func exactActressNamesMatch(left, right *models.Actress) bool {
-	if left == nil || right == nil {
+	leftKeys := canonicalActressRepresentationKeys(left)
+	if len(leftKeys) == 0 {
 		return false
 	}
-	if japanese := models.NormalizeActressNameKey(left.JapaneseName); japanese != "" && japanese == models.NormalizeActressNameKey(right.JapaneseName) {
-		return true
-	}
-	leftFirst, leftLast := strings.TrimSpace(left.FirstName), strings.TrimSpace(left.LastName)
-	rightFirst, rightLast := strings.TrimSpace(right.FirstName), strings.TrimSpace(right.LastName)
-	if leftFirst != "" && leftLast != "" && rightFirst != "" && rightLast != "" {
-		return models.NormalizeActressNameKey(leftLast+" "+leftFirst) == models.NormalizeActressNameKey(rightLast+" "+rightFirst) ||
-			models.NormalizeActressNameKey(leftFirst+" "+leftLast) == models.NormalizeActressNameKey(rightFirst+" "+rightLast)
-	}
-	if leftFirst != "" && leftLast == "" {
-		return rightLast == "" && models.NormalizeActressNameKey(leftFirst) == models.NormalizeActressNameKey(rightFirst)
-	}
-	if leftLast != "" && leftFirst == "" {
-		return rightFirst == "" && models.NormalizeActressNameKey(leftLast) == models.NormalizeActressNameKey(rightLast)
+	for key := range canonicalActressRepresentationKeys(right) {
+		if _, ok := leftKeys[key]; ok {
+			return true
+		}
 	}
 	return false
 }
