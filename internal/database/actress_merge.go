@@ -408,13 +408,14 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 		}
 
 		if err := tx.Model(&models.Actress{}).Where("id = ?", targetID).Updates(map[string]any{
-			colDMMID:        merged.DMMID,
-			colFirstName:    merged.FirstName,
-			colLastName:     merged.LastName,
-			colJapaneseName: merged.JapaneseName,
-			"thumb_url":     merged.ThumbURL,
-			"aliases":       merged.Aliases,
-			colUpdatedAt:    time.Now().UTC(),
+			colDMMID:                merged.DMMID,
+			colFirstName:            merged.FirstName,
+			colLastName:             merged.LastName,
+			colJapaneseName:         merged.JapaneseName,
+			"thumb_url":             merged.ThumbURL,
+			"aliases":               merged.Aliases,
+			colAmbiguityQuarantined: false,
+			colUpdatedAt:            time.Now().UTC(),
 		}).Error; err != nil {
 			if errors.Is(err, gorm.ErrDuplicatedKey) {
 				return ErrActressMergeUniqueConstraint

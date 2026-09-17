@@ -118,7 +118,7 @@ func TestCollisionServiceResolutions(t *testing.T) {
 			switch tc.resolution {
 			case "keep_identity":
 				require.Equal(t, "Truth", actress.FirstName)
-				require.Equal(t, tc.field != "identity_link", credit.DisplayForceCanonical)
+				require.Equal(t, tc.field == models.CreditFieldCreditedName, credit.DisplayForceCanonical)
 			case "adopt_alias":
 				require.True(t, credit.DisplayForceCanonical)
 				var alias models.ActressAlias

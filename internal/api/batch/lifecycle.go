@@ -13,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/api/core"
-	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/worker"
@@ -151,21 +150,8 @@ func refreshBatchJobMovies(c *gin.Context, deps *core.APIDeps, job *worker.Batch
 		if result == nil || result.Movie == nil {
 			continue
 		}
-		movieID := strings.TrimSpace(result.FileMatchInfo.MovieID)
-		if movieID == "" {
-			movieID = strings.TrimSpace(result.Movie.ContentID)
-		}
-		if movieID == "" {
-			movieID = strings.TrimSpace(result.Movie.ID)
-		}
-		if movieID == "" {
-			continue
-		}
-		current, err := deps.Repos.MovieRepo.FindByID(c.Request.Context(), movieID)
+		current, err := findAuthoritativeMovie(c.Request.Context(), deps.Repos.MovieRepo, result.Movie, result.FileMatchInfo.MovieID)
 		if err != nil {
-			if database.IsNotFound(err) {
-				continue
-			}
 			return err
 		}
 		if current == nil {

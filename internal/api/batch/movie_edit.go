@@ -192,7 +192,12 @@ func previewDisplayTitle(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
-		rendered := factory.RenderDisplayTitle(c.Request.Context(), contracts.MovieViewToModel(req.Movie))
+		movie, resolveErr := authoritativePreviewMovie(c.Request.Context(), rt.Deps(), c.Param("id"), c.Param("resultId"), req.Movie)
+		if resolveErr != nil {
+			resolveErr.Write(c)
+			return
+		}
+		rendered := factory.RenderDisplayTitle(c.Request.Context(), movie)
 		c.JSON(http.StatusOK, contracts.DisplayTitlePreviewResponse{DisplayTitle: rendered})
 	}
 }

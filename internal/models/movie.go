@@ -129,16 +129,17 @@ type MovieTranslation struct {
 
 // Actress represents a JAV actress
 type Actress struct {
-	ID           uint   `json:"id" gorm:"primaryKey"`
-	DMMID        int    `json:"dmm_id"` // Real DMM actress ID when available (unique only for values > 0)
-	FirstName    string `json:"first_name"`
-	LastName     string `json:"last_name"`
-	JapaneseName string `json:"japanese_name" gorm:"index"`
-	ThumbURL     string `json:"thumb_url"`
-	Aliases      string `json:"aliases"` // Pipe-separated
-	Verified     bool   `json:"verified"`
-	Origin       string `json:"origin"`
-	NameKey      string `json:"name_key" gorm:"index"`
+	ID                   uint   `json:"id" gorm:"primaryKey"`
+	DMMID                int    `json:"dmm_id"` // Real DMM actress ID when available (unique only for values > 0)
+	FirstName            string `json:"first_name"`
+	LastName             string `json:"last_name"`
+	JapaneseName         string `json:"japanese_name" gorm:"index"`
+	ThumbURL             string `json:"thumb_url"`
+	Aliases              string `json:"aliases"` // Pipe-separated
+	Verified             bool   `json:"verified"`
+	Origin               string `json:"origin"`
+	NameKey              string `json:"name_key" gorm:"index"`
+	AmbiguityQuarantined bool   `json:"-" gorm:"not null;default:false"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

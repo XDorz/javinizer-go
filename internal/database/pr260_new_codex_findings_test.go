@@ -31,10 +31,25 @@ func TestPositiveDMMScrapesDoNotClaimVerifiedDMMlessIdentityAcrossRestart(t *tes
 	require.Len(t, first.Credits, 1)
 	firstActressID := first.Credits[0].ActressID
 	require.NotEqual(t, verified.ID, firstActressID)
+	var candidate models.Actress
+	require.NoError(t, db.First(&candidate, firstActressID).Error)
+	require.True(t, candidate.AmbiguityQuarantined)
+	openCounts, err := NewCreditCollisionRepository(db).CountOpenByMovieBatch(ctx, []string{first.ContentID})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, openCounts[first.ContentID])
+	require.ErrorIs(t, NewMovieRepository(db).WithApplyArtifactPublicationFence(ctx, first.ContentID, first.RenderGeneration, func(*models.Movie) error { return nil }), ErrApplyArtifactPublicationBlocked)
 	require.NoError(t, db.Close())
 
 	db = open()
 	t.Cleanup(func() { _ = db.Close() })
+	sameMovie := creditMovie("DMM-CLAIM-1", []models.MovieCredit{{
+		CreditedName: "Same Person",
+		Scraped:      models.Actress{DMMID: 111, JapaneseName: "同名", FirstName: "Same", LastName: "Person"},
+	}})
+	same, err := NewMovieRepository(db).Upsert(ctx, sameMovie)
+	require.NoError(t, err)
+	require.Equal(t, firstActressID, same.Credits[0].ActressID)
+
 	secondMovie := creditMovie("DMM-CLAIM-2", []models.MovieCredit{{
 		CreditedName: "Same Person",
 		Scraped:      models.Actress{DMMID: 222, JapaneseName: "同名", FirstName: "Same", LastName: "Person"},
@@ -46,12 +61,29 @@ func TestPositiveDMMScrapesDoNotClaimVerifiedDMMlessIdentityAcrossRestart(t *tes
 	require.NotEqual(t, firstActressID, second.Credits[0].ActressID)
 
 	repeatedMovie := creditMovie("DMM-CLAIM-3", []models.MovieCredit{{
-		CreditedName: "Other spelling",
-		Scraped:      models.Actress{DMMID: 111, FirstName: "Other", LastName: "Spelling"},
+		CreditedName: "Same Person",
+		Scraped:      models.Actress{DMMID: 111, JapaneseName: "同名", FirstName: "Same", LastName: "Person"},
 	}})
 	repeated, err := NewMovieRepository(db).Upsert(ctx, repeatedMovie)
 	require.NoError(t, err)
 	require.Equal(t, firstActressID, repeated.Credits[0].ActressID)
+	openCounts, err = NewCreditCollisionRepository(db).CountOpenByMovieBatch(ctx, []string{same.ContentID, repeated.ContentID})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, openCounts[same.ContentID])
+	require.EqualValues(t, 1, openCounts[repeated.ContentID])
+	require.Empty(t, same.Actresses)
+	require.Empty(t, repeated.Actresses)
+	require.ErrorIs(t, NewMovieRepository(db).WithApplyArtifactPublicationFence(ctx, repeated.ContentID, repeated.RenderGeneration, func(*models.Movie) error { return nil }), ErrApplyArtifactPublicationBlocked)
+
+	require.NoError(t, NewActressRepository(db).PromoteCandidate(ctx, firstActressID, "Resolved", "Person", "", ""))
+	openCounts, err = NewCreditCollisionRepository(db).CountOpenByMovieBatch(ctx, []string{same.ContentID, repeated.ContentID})
+	require.NoError(t, err)
+	require.Zero(t, openCounts[same.ContentID])
+	require.Zero(t, openCounts[repeated.ContentID])
+	promoted, err := NewMovieRepository(db).FindByContentID(ctx, repeated.ContentID)
+	require.NoError(t, err)
+	require.Len(t, promoted.Actresses, 1)
+	require.Equal(t, firstActressID, promoted.Actresses[0].ID)
 
 	var verifiedAfter models.Actress
 	require.NoError(t, db.First(&verifiedAfter, verified.ID).Error)

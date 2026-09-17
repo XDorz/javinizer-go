@@ -179,9 +179,23 @@ func resolveAmbiguousCandidateTx(tx *gorm.DB, scraped *models.Actress, nameKey s
 			return nil, wrapDBErr("resolve candidate", fmt.Sprintf("dmm %d", scraped.DMMID), err)
 		}
 		if candidate != nil {
+			if !candidate.AmbiguityQuarantined {
+				if err := tx.Model(candidate).Update(colAmbiguityQuarantined, true).Error; err != nil {
+					return nil, wrapDBErr("quarantine candidate", fmt.Sprintf("dmm %d", scraped.DMMID), err)
+				}
+				candidate.AmbiguityQuarantined = true
+			}
 			return candidate, nil
 		}
-		return createCandidateTx(tx, scraped, "")
+		candidate, err = createCandidateTx(tx, scraped, "")
+		if err != nil {
+			return nil, err
+		}
+		if err := tx.Model(candidate).Update(colAmbiguityQuarantined, true).Error; err != nil {
+			return nil, wrapDBErr("quarantine candidate", fmt.Sprintf("dmm %d", scraped.DMMID), err)
+		}
+		candidate.AmbiguityQuarantined = true
+		return candidate, nil
 	}
 	if nameKey == "" {
 		return nil, fmt.Errorf("resolve actress identity: ambiguous match with empty name key")
@@ -250,7 +264,7 @@ func ResolveActressIdentityTx(tx *gorm.DB, scraped *models.Actress) (*models.Act
 			return nil, ResolutionMatched, wrapDBErr("resolve dmm", fmt.Sprintf("dmm %d", scraped.DMMID), err)
 		}
 		if found != nil {
-			if !found.Verified && found.NameKey != "" {
+			if !found.Verified && (found.AmbiguityQuarantined || found.NameKey != "") {
 				return found, ResolutionAmbiguous, nil
 			}
 			if !found.Verified {

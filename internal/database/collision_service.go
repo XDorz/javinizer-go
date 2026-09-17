@@ -68,19 +68,17 @@ func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution s
 		if collision.Field == models.CreditFieldIdentityLink && credit.Actress != nil && !credit.Actress.Verified {
 			return 0, fmt.Errorf("resolve collision: keep_identity requires a verified identity")
 		}
-		if collision.Field != models.CreditFieldIdentityLink {
-			if err := tx.Model(&models.MovieCredit{}).Where("id = ?", credit.ID).
-				Update("display_force_canonical", true).Error; err != nil {
-				return 0, wrapDBErr("force canonical", fmt.Sprintf("credit %d", credit.ID), err)
-			}
+		if err := applyCollisionFieldEffectTx(tx, credit.ID, collision.Field, resolution); err != nil {
+			return 0, err
 		}
 	case models.CollisionResolutionAdoptCanonical:
 		switch collision.Field {
 		case models.CreditFieldIdentityLink:
 			updates := map[string]interface{}{
-				colVerified:  true,
-				colOrigin:    ActressOriginUser,
-				colUpdatedAt: time.Now().UTC(),
+				colVerified:             true,
+				colOrigin:               ActressOriginUser,
+				colAmbiguityQuarantined: false,
+				colUpdatedAt:            time.Now().UTC(),
 			}
 			if strings.TrimSpace(credit.CreditedJapaneseName) != "" {
 				updates[colJapaneseName] = credit.CreditedJapaneseName
@@ -130,9 +128,8 @@ func (s *CollisionService) resolveTx(tx *gorm.DB, collisionID uint, resolution s
 		if collision.Field != models.CreditFieldCreditedName {
 			return 0, fmt.Errorf("resolve collision: adopt_alias requires a credited_name collision")
 		}
-		if err := tx.Model(&models.MovieCredit{}).Where("id = ?", credit.ID).
-			Update("display_force_canonical", true).Error; err != nil {
-			return 0, wrapDBErr("force canonical", fmt.Sprintf("credit %d", credit.ID), err)
+		if err := applyCollisionFieldEffectTx(tx, credit.ID, collision.Field, resolution); err != nil {
+			return 0, err
 		}
 		canonical := collision.CanonicalValue
 		if canonical == "" && credit.Actress != nil {

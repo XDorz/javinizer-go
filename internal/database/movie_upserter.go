@@ -951,11 +951,8 @@ func (u *MovieUpserter) recordFieldCollisionsTx(tx *gorm.DB, collisionRepo *Cred
 		if err := collisionRepo.ResolveTx(tx, collision.ID, decision.Resolution); err != nil {
 			return err
 		}
-		if decision.Resolution == models.CollisionResolutionAutoKeep || decision.Resolution == models.CollisionResolutionAutoAlias {
-			if err := tx.Model(&models.MovieCredit{}).Where("id = ?", credit.ID).
-				Update("display_force_canonical", true).Error; err != nil {
-				return err
-			}
+		if err := applyCollisionFieldEffectTx(tx, credit.ID, c.field, decision.Resolution); err != nil {
+			return err
 		}
 		if decision.CreateAlias && c.field == models.CreditFieldCreditedName {
 			alias := &models.ActressAlias{AliasName: c.reported, CanonicalName: c.canonical}

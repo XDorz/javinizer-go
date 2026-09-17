@@ -94,7 +94,7 @@ func TestAmbiguousDMMCandidatesRemainSeparate(t *testing.T) {
 		DMMID: 2002, JapaneseName: "別名", FirstName: "Other", LastName: "Name",
 	})
 	require.NoError(t, err)
-	require.Equal(t, ResolutionCandidateLinked, repeatedOutcome)
+	require.Equal(t, ResolutionAmbiguous, repeatedOutcome)
 	require.Equal(t, second.ID, repeated.ID)
 
 	candidates, err := NewActressRepository(db).ListCandidates(context.Background(), 100, 0)
@@ -148,4 +148,46 @@ func TestCreditUpsertPreservesUserOwnershipAndPinnedOrder(t *testing.T) {
 	require.NoError(t, service.Credits.DeleteByIDTx(db.DB, credit.ID))
 	_, err = service.Credits.FindByCreditID(ctx, credit.ID)
 	require.ErrorIs(t, err, ErrNotFound)
+}
+
+func TestAmbiguousCandidateMarkerTransitions(t *testing.T) {
+	t.Run("existing candidate is marked", func(t *testing.T) {
+		db := newCreditTestDB(t)
+		candidate := models.Actress{DMMID: 801, Verified: false, Origin: ActressOriginScrape}
+		require.NoError(t, db.Create(&candidate).Error)
+		resolved, err := resolveAmbiguousCandidateTx(db.DB, &models.Actress{DMMID: 801}, "unused")
+		require.NoError(t, err)
+		require.True(t, resolved.AmbiguityQuarantined)
+	})
+	t.Run("new candidate is marked", func(t *testing.T) {
+		db := newCreditTestDB(t)
+		resolved, err := resolveAmbiguousCandidateTx(db.DB, &models.Actress{DMMID: 802}, "unused")
+		require.NoError(t, err)
+		require.True(t, resolved.AmbiguityQuarantined)
+	})
+	t.Run("existing marker update failure", func(t *testing.T) {
+		db := newCreditTestDB(t)
+		candidate := models.Actress{DMMID: 803, Verified: false, Origin: ActressOriginScrape}
+		require.NoError(t, db.Create(&candidate).Error)
+		injectDatabaseCallbackError(t, db, "update", "actresses", 1)
+		_, err := resolveAmbiguousCandidateTx(db.DB, &models.Actress{DMMID: 803}, "unused")
+		require.ErrorContains(t, err, "quarantine candidate")
+	})
+	t.Run("candidate creation failure", func(t *testing.T) {
+		db := newCreditTestDB(t)
+		injectDatabaseCallbackError(t, db, "create", "actresses", 1)
+		_, err := resolveAmbiguousCandidateTx(db.DB, &models.Actress{DMMID: 805}, "unused")
+		require.Error(t, err)
+	})
+	t.Run("new marker update failure", func(t *testing.T) {
+		db := newCreditTestDB(t)
+		injectDatabaseCallbackError(t, db, "update", "actresses", 1)
+		_, err := resolveAmbiguousCandidateTx(db.DB, &models.Actress{DMMID: 804}, "unused")
+		require.ErrorContains(t, err, "quarantine candidate")
+	})
+}
+
+func TestCollisionEffectLeavesNonOwningActionsUntouched(t *testing.T) {
+	require.Equal(t, collisionFieldEffect{}, collisionEffect(models.CreditFieldCreditedName, models.CollisionResolutionAdoptCanonical))
+	require.Equal(t, collisionFieldEffect{}, collisionEffect(models.CreditFieldReportedThumb, models.CollisionResolutionAutoKeep))
 }

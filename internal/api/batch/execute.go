@@ -2,6 +2,7 @@ package batch
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -284,7 +285,7 @@ func previewOrganize(rt *core.APIRuntime) gin.HandlerFunc {
 			}
 		}
 
-		movieData, fileMatchInfos, previewResolveErr := ResolvePreviewData(rt.Deps(), jobID, resultID, req)
+		movieData, fileMatchInfos, previewResolveErr := ResolvePreviewData(c.Request.Context(), rt.Deps(), jobID, resultID, req)
 		if previewResolveErr != nil {
 			previewResolveErr.Write(c)
 			return
@@ -335,7 +336,7 @@ func (e *previewResolveError) Write(c *gin.Context) {
 // resolves the movie (including multi-part), and returns sorted file match
 // infos. Returns a previewResolveError for HTTP-layer errors so the caller
 // can write the response.
-func ResolvePreviewData(deps *core.APIDeps, jobID string, resultID string, req contracts.OrganizePreviewRequest) (*models.Movie, []models.FileMatchInfo, *previewResolveError) {
+func ResolvePreviewData(ctx context.Context, deps *core.APIDeps, jobID string, resultID string, req contracts.OrganizePreviewRequest) (*models.Movie, []models.FileMatchInfo, *previewResolveError) {
 	job, ok := deps.GetJobStore().GetBatchJob(jobID)
 	if !ok {
 		return nil, nil, &previewResolveError{Status: http.StatusNotFound, Err: jobNotFoundMessage}
@@ -354,22 +355,9 @@ func ResolvePreviewData(deps *core.APIDeps, jobID string, resultID string, req c
 		return nil, nil, &previewResolveError{Status: http.StatusNotFound, Err: fmt.Sprintf("Movie %s not found in job", movieID)}
 	}
 
-	// Use the movie override from the request if provided (for previewing unsaved edits),
-	// otherwise fall back to the movie data stored in the job results
-	var movieData *models.Movie
-	if req.Movie != nil {
-		movieData = contracts.MovieViewToModel(req.Movie)
-	} else {
-		for _, result := range fileResults {
-			if result.Movie != nil {
-				movieData = result.Movie
-				break
-			}
-		}
-	}
-
-	if movieData == nil {
-		return nil, nil, &previewResolveError{Status: http.StatusNotFound, Err: fmt.Sprintf("Movie %s not found in job", movieID)}
+	movieData, authorityErr := authoritativePreviewMovie(ctx, deps, jobID, resultID, req.Movie)
+	if authorityErr != nil {
+		return nil, nil, authorityErr
 	}
 
 	// Sort fileResults by PartNumber to ensure deterministic order

@@ -503,12 +503,13 @@ func (r *ActressRepository) PromoteCandidate(ctx context.Context, id uint, first
 
 func promoteCandidateTx(tx *gorm.DB, id uint, firstName, lastName, japaneseName, thumbURL string) error {
 	updates := map[string]interface{}{
-		"verified":      true,
-		"origin":        ActressOriginUser,
-		colFirstName:    firstName,
-		colLastName:     lastName,
-		colJapaneseName: japaneseName,
-		"thumb_url":     thumbURL,
+		"verified":              true,
+		"origin":                ActressOriginUser,
+		colAmbiguityQuarantined: false,
+		colFirstName:            firstName,
+		colLastName:             lastName,
+		colJapaneseName:         japaneseName,
+		"thumb_url":             thumbURL,
 	}
 	var candidate models.Actress
 	if err := tx.First(&candidate, id).Error; err != nil {
@@ -541,7 +542,7 @@ func (r *ActressRepository) SetUserOwned(ctx context.Context, id uint) error {
 func (r *ActressRepository) UpdateCanonicalFields(ctx context.Context, id uint, firstName, lastName, japaneseName, thumbURL string) error {
 	updates := map[string]interface{}{
 		colFirstName: firstName, colLastName: lastName, colJapaneseName: japaneseName,
-		"thumb_url": thumbURL, "origin": ActressOriginUser, "verified": true,
+		"thumb_url": thumbURL, "origin": ActressOriginUser, "verified": true, colAmbiguityQuarantined: false,
 	}
 	return r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		contentIDs, err := movieContentIDsForActressesTx(tx, id)

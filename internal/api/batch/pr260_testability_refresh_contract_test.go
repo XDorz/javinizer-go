@@ -20,6 +20,9 @@ type nilMovieReadRepo struct {
 }
 
 func (nilMovieReadRepo) FindByID(context.Context, string) (*models.Movie, error) { return nil, nil }
+func (nilMovieReadRepo) FindByContentID(context.Context, string) (*models.Movie, error) {
+	return nil, nil
+}
 
 type markerlessLiveJob struct{ worker.BatchJobInterface }
 type markerlessJobStore struct{ worker.JobStoreInterface }
