@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/models"
@@ -78,6 +80,30 @@ func baseLstat(fs afero.Fs, name string) (os.FileInfo, bool, error) {
 	return info, false, err
 }
 
+func replacementBatchTestPathEqual(a, b string) bool {
+	return filepath.Clean(a) == filepath.Clean(b)
+}
+
+func cleanupReplacementBatchLocks(t *testing.T, batch *ReplacementBatch) {
+	t.Helper()
+	t.Cleanup(func() {
+		for _, leg := range batch.legs {
+			leg.release()
+		}
+	})
+}
+
+func requireReplacementBatchFaultObserved(t *testing.T, observed <-chan struct{}) {
+	t.Helper()
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-observed:
+	case <-timer.C:
+		t.Fatal("replacement batch fault hook did not match the cleaned destination path")
+	}
+}
+
 func TestReplacementBatchRejectsInspectionAndReservationFaultsWithoutLosingDestination(t *testing.T) {
 	sentinel := errors.New("filesystem fault")
 	t.Run("preflight inspection", func(t *testing.T) {
@@ -89,36 +115,46 @@ func TestReplacementBatchRejectsInspectionAndReservationFaultsWithoutLosingDesti
 	})
 	t.Run("busy marker", func(t *testing.T) {
 		base := afero.NewMemMapFs()
-		require.NoError(t, afero.WriteFile(base, "/dest", []byte("old"), 0o644))
+		destination := string(os.PathSeparator) + "unused" + string(os.PathSeparator) + ".." + string(os.PathSeparator) + "dest"
+		require.NoError(t, afero.WriteFile(base, filepath.Clean(destination), []byte("old"), 0o644))
+		observed := make(chan struct{}, 1)
 		fs := &replacementFaultFS{Fs: base, openFile: func(name string, flag int, perm os.FileMode) (afero.File, error) {
-			if name == fsutil.ReplacementBusyPath("/dest") {
+			if replacementBatchTestPathEqual(name, fsutil.ReplacementBusyPath(destination)) {
+				observed <- struct{}{}
 				return nil, sentinel
 			}
 			return base.OpenFile(name, flag, perm)
 		}}
 		batch, _ := NewReplacementBatch(fs, "op", &replacementBatchRecorder{})
-		_, err := batch.BeforePublish(t.Context(), "/dest", true)
+		cleanupReplacementBatchLocks(t, batch)
+		_, err := batch.BeforePublish(t.Context(), destination, true)
+		requireReplacementBatchFaultObserved(t, observed)
 		require.ErrorIs(t, err, sentinel)
-		require.Equal(t, "old", string(mustReadReplacementBatch(t, base, "/dest")))
+		require.Equal(t, "old", string(mustReadReplacementBatch(t, base, filepath.Clean(destination))))
 	})
 	t.Run("reclassification inspection", func(t *testing.T) {
 		base := afero.NewMemMapFs()
-		require.NoError(t, afero.WriteFile(base, "/dest", []byte("old"), 0o644))
+		destination := string(os.PathSeparator) + "unused" + string(os.PathSeparator) + ".." + string(os.PathSeparator) + "dest"
+		require.NoError(t, afero.WriteFile(base, filepath.Clean(destination), []byte("old"), 0o644))
 		calls := 0
+		observed := make(chan struct{}, 1)
 		fs := &replacementFaultFS{Fs: base}
 		fs.lstat = func(name string) (os.FileInfo, bool, error) {
-			if name == "/dest" {
+			if replacementBatchTestPathEqual(name, destination) {
 				calls++
 				if calls == 2 {
+					observed <- struct{}{}
 					return nil, false, sentinel
 				}
 			}
 			return baseLstat(base, name)
 		}
 		batch, _ := NewReplacementBatch(fs, "op", &replacementBatchRecorder{})
-		_, err := batch.BeforePublish(t.Context(), "/dest", true)
+		cleanupReplacementBatchLocks(t, batch)
+		_, err := batch.BeforePublish(t.Context(), destination, true)
+		requireReplacementBatchFaultObserved(t, observed)
 		require.ErrorIs(t, err, sentinel)
-		require.Equal(t, "old", string(mustReadReplacementBatch(t, base, "/dest")))
+		require.Equal(t, "old", string(mustReadReplacementBatch(t, base, filepath.Clean(destination))))
 	})
 	t.Run("destination changes to directory", func(t *testing.T) {
 		base := afero.NewMemMapFs()
@@ -126,7 +162,7 @@ func TestReplacementBatchRejectsInspectionAndReservationFaultsWithoutLosingDesti
 		calls := 0
 		fs := &replacementFaultFS{Fs: base}
 		fs.lstat = func(name string) (os.FileInfo, bool, error) {
-			if name == "/dest" {
+			if replacementBatchTestPathEqual(name, "/dest") {
 				calls++
 				if calls == 2 {
 					require.NoError(t, base.Remove(name))
@@ -136,6 +172,7 @@ func TestReplacementBatchRejectsInspectionAndReservationFaultsWithoutLosingDesti
 			return baseLstat(base, name)
 		}
 		batch, _ := NewReplacementBatch(fs, "op", &replacementBatchRecorder{})
+		cleanupReplacementBatchLocks(t, batch)
 		_, err := batch.BeforePublish(t.Context(), "/dest", true)
 		require.ErrorContains(t, err, "not a regular file")
 		info, statErr := base.Stat("/dest")
@@ -152,6 +189,7 @@ func TestReplacementBatchRejectsInspectionAndReservationFaultsWithoutLosingDesti
 			return base.OpenFile(name, flag, perm)
 		}}
 		batch, _ := NewReplacementBatch(fs, "op", &replacementBatchRecorder{})
+		cleanupReplacementBatchLocks(t, batch)
 		_, err := batch.BeforePublish(t.Context(), "/dest", true)
 		require.ErrorIs(t, err, sentinel)
 		require.Equal(t, "old", string(mustReadReplacementBatch(t, base, "/dest")))
@@ -168,6 +206,7 @@ func TestReplacementBatchRejectsInspectionAndReservationFaultsWithoutLosingDesti
 			return info, used, err
 		}
 		batch, _ := NewReplacementBatch(fs, "op", &replacementBatchRecorder{})
+		cleanupReplacementBatchLocks(t, batch)
 		_, err := batch.BeforePublish(t.Context(), "/dest", true)
 		require.ErrorContains(t, err, "claim staged replacement backup")
 		require.Equal(t, "old", string(mustReadReplacementBatch(t, base, "/dest")))
@@ -177,6 +216,7 @@ func TestReplacementBatchRejectsInspectionAndReservationFaultsWithoutLosingDesti
 		require.NoError(t, afero.WriteFile(base, "/dest", []byte("old"), 0o644))
 		fs := &replacementFaultFS{Fs: base, rename: func(string, string) error { return sentinel }}
 		batch, _ := NewReplacementBatch(fs, "op", &replacementBatchRecorder{})
+		cleanupReplacementBatchLocks(t, batch)
 		_, err := batch.BeforePublish(t.Context(), "/dest", true)
 		require.ErrorIs(t, err, sentinel)
 		require.Equal(t, "old", string(mustReadReplacementBatch(t, base, "/dest")))
@@ -190,7 +230,7 @@ func TestReplacementBatchRetainsRecoveryObjectsWhenJournalOrRestoreFails(t *test
 	failRestore := false
 	fs := &replacementFaultFS{Fs: base}
 	fs.rename = func(oldname, newname string) error {
-		if failRestore && strings.Contains(oldname, ".dlbak.") && newname == "/dest" {
+		if failRestore && strings.Contains(oldname, ".dlbak.") && replacementBatchTestPathEqual(newname, "/dest") {
 			return sentinel
 		}
 		return base.Rename(oldname, newname)
@@ -228,7 +268,7 @@ func TestReplacementBatchInstalledFactsFailureLeavesJournalActionable(t *testing
 	sentinel := errors.New("installed output unreadable")
 	fs := &replacementFaultFS{Fs: base}
 	fs.lstat = func(name string) (os.FileInfo, bool, error) {
-		if failInspect && name == "/dest" {
+		if failInspect && replacementBatchTestPathEqual(name, "/dest") {
 			inspectCalls++
 			if inspectCalls == 2 {
 				return nil, false, sentinel
@@ -257,7 +297,7 @@ func TestReplacementBatchDirectOriginTrackingFailsClosed(t *testing.T) {
 		base := afero.NewMemMapFs()
 		require.NoError(t, afero.WriteFile(base, "/dest", []byte("new"), 0o644))
 		fs := &replacementFaultFS{Fs: base, openFile: func(name string, flag int, perm os.FileMode) (afero.File, error) {
-			if name == fsutil.ReplacementBusyPath("/dest") {
+			if replacementBatchTestPathEqual(name, fsutil.ReplacementBusyPath("/dest")) {
 				return nil, errors.New("marker unavailable")
 			}
 			return base.OpenFile(name, flag, perm)
@@ -275,6 +315,7 @@ func TestReplacementBatchDirectOriginTrackingFailsClosed(t *testing.T) {
 	t.Run("armed but not installed", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
 		batch, _ := NewReplacementBatch(fs, "op", &replacementBatchRecorder{})
+		cleanupReplacementBatchLocks(t, batch)
 		_, err := batch.BeforePublish(t.Context(), "/dest", false)
 		require.NoError(t, err)
 		require.ErrorContains(t, batch.SetRollbackOrigin("/dest", "/source"), "no installed output")
@@ -286,7 +327,7 @@ func TestReplacementBatchRollbackReportsMarkerAndRestoreFailures(t *testing.T) {
 	t.Run("marker reacquire", func(t *testing.T) {
 		base := afero.NewMemMapFs()
 		fs := &replacementFaultFS{Fs: base, openFile: func(name string, flag int, perm os.FileMode) (afero.File, error) {
-			if name == fsutil.ReplacementBusyPath("/dest") {
+			if replacementBatchTestPathEqual(name, fsutil.ReplacementBusyPath("/dest")) {
 				return nil, errors.New("marker reacquire")
 			}
 			return base.OpenFile(name, flag, perm)
