@@ -754,6 +754,18 @@ func (r *ActressRepository) DeleteStaleCandidates(ctx context.Context, olderThan
 			return wrapDBErr("list", "stale candidates", err)
 		}
 		for i := range candidates {
+			if err := tx.Exec(`
+DELETE FROM movie_actresses
+WHERE actress_id = ?
+  AND (
+      movie_content_id IS NULL
+      OR NOT EXISTS (
+          SELECT 1 FROM movies m
+          WHERE m.content_id = movie_actresses.movie_content_id
+      )
+  )`, candidates[i].ID).Error; err != nil {
+				return wrapDBErr("delete", fmt.Sprintf("non-projectable legacy associations for stale candidate %d", candidates[i].ID), err)
+			}
 			keys := make([]string, 0, 3)
 			for key := range canonicalActressRepresentationKeys(&candidates[i]) {
 				keys = append(keys, key)
@@ -764,6 +776,12 @@ WHERE id = ?
   AND verified = 0
   AND updated_at < ?
   AND id NOT IN (SELECT DISTINCT actress_id FROM movie_credits)
+  AND NOT EXISTS (
+      SELECT 1
+      FROM movie_actresses ma
+      JOIN movies m ON m.content_id = ma.movie_content_id
+      WHERE ma.actress_id = actresses.id
+  )
   AND NOT EXISTS (
       SELECT 1 FROM movie_credit_reassignments mr
       WHERE mr.source_actress_id = actresses.id

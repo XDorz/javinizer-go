@@ -40,7 +40,15 @@ func movieContentIDsForActressesTx(tx *gorm.DB, actressIDs ...uint) ([]string, e
 		return nil, nil
 	}
 	var contentIDs []string
-	if err := tx.Model(&models.MovieCredit{}).Distinct("movie_content_id").Where("actress_id IN ?", actressIDs).Pluck("movie_content_id", &contentIDs).Error; err != nil {
+	if err := tx.Raw(`
+SELECT movie_content_id
+FROM movie_credits
+WHERE actress_id IN ?
+UNION
+SELECT movie_content_id
+FROM movie_actresses
+WHERE actress_id IN ?
+  AND movie_content_id IS NOT NULL`, actressIDs, actressIDs).Scan(&contentIDs).Error; err != nil {
 		return nil, wrapDBErr("snapshot render", "movies for actresses", err)
 	}
 	return uniqueContentIDs(contentIDs), nil

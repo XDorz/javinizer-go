@@ -75,6 +75,22 @@ type actressMerger struct {
 // moveMovieAssociations moves movie associations from source actress to target actress.
 // Returns count of updated movies. Uses the provided transaction.
 func moveMovieAssociations(tx *gorm.DB, sourceID, targetID uint) (int, error) {
+	// A legacy row whose movie key is NULL or missing cannot project onto a
+	// movie, and the inner join below cannot transfer it. Remove it
+	// transactionally before deleting the source identity.
+	if err := tx.Exec(`
+DELETE FROM movie_actresses
+WHERE actress_id = ?
+  AND (
+      movie_content_id IS NULL
+      OR NOT EXISTS (
+          SELECT 1 FROM movies m
+          WHERE m.content_id = movie_actresses.movie_content_id
+      )
+  )`, sourceID).Error; err != nil {
+		return 0, err
+	}
+
 	// Use the join table to find only movies that reference the source actress,
 	// avoiding a full-table scan that loads every movie into memory.
 	var movieContentIDs []string
