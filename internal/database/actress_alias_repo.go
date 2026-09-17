@@ -177,22 +177,108 @@ func backfillActressCandidateNameKeys(ctx context.Context, db *gorm.DB) error {
 			return wrapDBErr("list", "actress candidates for normalized-key backfill", err)
 		}
 
-		groups := make(map[string]map[uint]struct{})
+		groups := make(map[string][]int)
 		for i := range candidates {
 			for key := range candidateEvidenceKeys(&candidates[i]) {
-				if groups[key] == nil {
-					groups[key] = make(map[uint]struct{})
-				}
-				groups[key][candidates[i].ID] = struct{}{}
+				groups[key] = append(groups[key], i)
 			}
 		}
-		ambiguous := make(map[uint]struct{})
-		for _, ids := range groups {
-			if len(ids) < 2 {
-				continue
+
+		// Build connected components only among DMM-less candidates. Positive
+		// DMM IDs are hard identity boundaries and are never connected to a
+		// component that has evidence for another positive ID.
+		parent := make([]int, len(candidates))
+		for i := range parent {
+			parent[i] = i
+		}
+		var find func(int) int
+		find = func(i int) int {
+			if parent[i] != i {
+				parent[i] = find(parent[i])
 			}
-			for id := range ids {
-				ambiguous[id] = struct{}{}
+			return parent[i]
+		}
+		union := func(a, b int) {
+			ra, rb := find(a), find(b)
+			if ra != rb {
+				parent[rb] = ra
+			}
+		}
+		for _, group := range groups {
+			first := -1
+			for _, index := range group {
+				if candidates[index].DMMID > 0 {
+					continue
+				}
+				if first < 0 {
+					first = index
+				} else {
+					union(first, index)
+				}
+			}
+		}
+
+		zeroMembers := make(map[int][]int)
+		adjacentPositive := make(map[int]map[int][]int)
+		for i := range candidates {
+			if candidates[i].DMMID <= 0 {
+				root := find(i)
+				zeroMembers[root] = append(zeroMembers[root], i)
+			}
+		}
+		for _, group := range groups {
+			roots := make(map[int]struct{})
+			positives := make([]int, 0)
+			for _, index := range group {
+				if candidates[index].DMMID <= 0 {
+					roots[find(index)] = struct{}{}
+				} else {
+					positives = append(positives, index)
+				}
+			}
+			for root := range roots {
+				if adjacentPositive[root] == nil {
+					adjacentPositive[root] = make(map[int][]int)
+				}
+				for _, index := range positives {
+					dmm := candidates[index].DMMID
+					adjacentPositive[root][dmm] = append(adjacentPositive[root][dmm], index)
+				}
+			}
+		}
+
+		ambiguous := make(map[uint]struct{})
+		for root, members := range zeroMembers {
+			positiveIDs := adjacentPositive[root]
+			if len(members) > 1 || len(positiveIDs) > 0 {
+				for _, index := range members {
+					ambiguous[candidates[index].ID] = struct{}{}
+				}
+			}
+			if len(positiveIDs) == 1 {
+				for _, indexes := range positiveIDs {
+					for _, index := range indexes {
+						ambiguous[candidates[index].ID] = struct{}{}
+					}
+				}
+			}
+		}
+		// Legacy duplicate rows carrying the SAME positive DMM remain one
+		// ambiguous identity; migration 19's partial unique index prevents new
+		// duplicates. Distinct positive IDs are deliberately never marked.
+		for _, group := range groups {
+			byDMM := make(map[int][]int)
+			for _, index := range group {
+				if candidates[index].DMMID > 0 {
+					byDMM[candidates[index].DMMID] = append(byDMM[candidates[index].DMMID], index)
+				}
+			}
+			for _, indexes := range byDMM {
+				if len(indexes) > 1 {
+					for _, index := range indexes {
+						ambiguous[candidates[index].ID] = struct{}{}
+					}
+				}
 			}
 		}
 
@@ -216,9 +302,15 @@ func backfillActressCandidateNameKeys(ctx context.Context, db *gorm.DB) error {
 				}
 				continue
 			}
-			// Positive-DMM candidates are intentionally keyless: DMM is their
-			// identity evidence, while names remain usable for ambiguity scans.
-			if candidate.DMMID > 0 || candidate.AmbiguityQuarantined {
+			// Rows quarantined by an older name-only backfill must be repaired
+			// when the DMM-compatible partition no longer considers them
+			// ambiguous. Positive-DMM candidates remain intentionally keyless.
+			if candidate.AmbiguityQuarantined {
+				if err := tx.Model(&models.Actress{}).Where("id = ?", candidate.ID).UpdateColumn(colAmbiguityQuarantined, false).Error; err != nil {
+					return wrapDBErr("unquarantine", fmt.Sprintf("actress candidate %d normalized representations", candidate.ID), err)
+				}
+			}
+			if candidate.DMMID > 0 {
 				continue
 			}
 			if key := actressNameKey(candidate); key != "" {

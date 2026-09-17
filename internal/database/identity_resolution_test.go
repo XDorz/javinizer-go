@@ -30,7 +30,7 @@ func TestIdentityResolutionAliasAndDMMHierarchy(t *testing.T) {
 	require.NoError(t, db.Model(&candidate).Update("name_key", "ambiguous").Error)
 	_, outcome, err = ResolveActressIdentityTx(db.DB, &models.Actress{DMMID: 654})
 	require.NoError(t, err)
-	require.Equal(t, ResolutionAmbiguous, outcome)
+	require.Equal(t, ResolutionCandidateLinked, outcome)
 	b := models.Actress{FirstName: "Other", JapaneseName: "本名", Verified: true}
 	require.NoError(t, db.Create(&b).Error)
 	found, outcome, err = ResolveActressIdentityTx(db.DB, &models.Actress{JapaneseName: "別名"})
@@ -94,7 +94,7 @@ func TestAmbiguousDMMCandidatesRemainSeparate(t *testing.T) {
 		DMMID: 2002, JapaneseName: "別名", FirstName: "Other", LastName: "Name",
 	})
 	require.NoError(t, err)
-	require.Equal(t, ResolutionAmbiguous, repeatedOutcome)
+	require.Equal(t, ResolutionCandidateLinked, repeatedOutcome)
 	require.Equal(t, second.ID, repeated.ID)
 
 	candidates, err := NewActressRepository(db).ListCandidates(context.Background(), 100, 0)

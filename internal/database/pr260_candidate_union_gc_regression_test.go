@@ -76,6 +76,41 @@ func TestCandidateResolutionUnionsKeyedAndKeylessRepresentations(t *testing.T) {
 	})
 }
 
+func TestCandidateBackfillDistinctPositiveDMMsRemainExactAcrossRestart(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "candidate-distinct-dmm.db")
+	cfg := &Config{Type: "sqlite", DSN: path, LogLevel: "silent"}
+
+	db, err := New(cfg)
+	require.NoError(t, err)
+	require.NoError(t, db.RunMigrationsOnStartup(ctx))
+	first := models.Actress{DMMID: 92001, JapaneseName: "Shared Stage Name", Origin: ActressOriginScrape}
+	second := models.Actress{DMMID: 92002, JapaneseName: "Ｓｈａｒｅｄ　Ｓｔａｇｅ　Ｎａｍｅ", Origin: ActressOriginScrape}
+	require.NoError(t, db.Create(&first).Error)
+	require.NoError(t, db.Create(&second).Error)
+	// Simulate rows marked by the legacy name-only backfill before restart.
+	require.NoError(t, db.Model(&models.Actress{}).Where("id IN ?", []uint{first.ID, second.ID}).UpdateColumn(colAmbiguityQuarantined, true).Error)
+	require.NoError(t, db.Close())
+
+	for restart := 0; restart < 2; restart++ {
+		db, err = New(cfg)
+		require.NoError(t, err)
+		require.NoError(t, db.RunMigrationsOnStartup(ctx))
+		for _, expected := range []models.Actress{first, second} {
+			var stored models.Actress
+			require.NoError(t, db.First(&stored, expected.ID).Error)
+			require.False(t, stored.AmbiguityQuarantined)
+			resolved, outcome, resolveErr := ResolveActressIdentityTx(db.DB, &models.Actress{DMMID: expected.DMMID, JapaneseName: "unrelated"})
+			require.NoError(t, resolveErr)
+			require.Equal(t, ResolutionCandidateLinked, outcome)
+			require.Equal(t, expected.ID, resolved.ID)
+		}
+		_, _, nameErr := ResolveActressIdentityTx(db.DB, &models.Actress{JapaneseName: "shared stage name"})
+		require.ErrorIs(t, nameErr, ErrActressCandidateAmbiguous)
+		require.NoError(t, db.Close())
+	}
+}
+
 func TestCandidateBackfillUnionsOldKeyedAndIntentionalKeylessAfterRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "candidate-union.db")

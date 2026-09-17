@@ -313,9 +313,9 @@ func ResolveActressIdentityTx(tx *gorm.DB, scraped *models.Actress) (*models.Act
 			return nil, ResolutionMatched, wrapDBErr("resolve dmm", fmt.Sprintf("dmm %d", scraped.DMMID), err)
 		}
 		if found != nil {
-			if !found.Verified && (found.AmbiguityQuarantined || found.NameKey != "") {
-				return found, ResolutionAmbiguous, nil
-			}
+			// Exact positive-DMM evidence is the identity boundary. Name-based
+			// quarantine only governs name-only resolution and must not downgrade
+			// an exact candidate hit to ambiguity.
 			if !found.Verified {
 				return found, ResolutionCandidateLinked, nil
 			}
