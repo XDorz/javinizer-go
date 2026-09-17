@@ -421,10 +421,10 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 			}
 			return wrapDBErr("update", fmt.Sprintf("merge actress %d", targetID), err)
 		}
-		if err := transitionActressCanonicalNamesTx(tx, targetID, &previousTarget); err != nil {
+		if err := transitionActressCanonicalNamesForMergeTx(tx, targetID, sourceID, &previousTarget); err != nil {
 			return wrapDBErr("merge", fmt.Sprintf("stored aliases from actress %d", targetID), err)
 		}
-		if err := transitionActressCanonicalNamesTx(tx, targetID, &source); err != nil {
+		if err := transitionActressCanonicalNamesForMergeTx(tx, targetID, sourceID, &source); err != nil {
 			return wrapDBErr("merge", fmt.Sprintf("stored aliases from actress %d", sourceID), err)
 		}
 

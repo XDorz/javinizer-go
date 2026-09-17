@@ -583,6 +583,14 @@ func actressNameMatchesCanonicalRepresentations(reported string, actress *models
 }
 
 func transitionActressCanonicalNamesTx(tx *gorm.DB, actressID uint, previous *models.Actress) error {
+	return transitionActressCanonicalNamesForMergeTx(tx, actressID, actressID, previous)
+}
+
+// transitionActressCanonicalNamesForMergeTx binds canonical ownership proof to
+// the one source and one target selected by the merge. Rename callers pass the
+// same ID for both arguments.
+func transitionActressCanonicalNamesForMergeTx(tx *gorm.DB, targetActressID, sourceActressID uint, previous *models.Actress) error {
+	actressID := targetActressID
 	if previous == nil {
 		return nil
 	}
@@ -607,13 +615,20 @@ func transitionActressCanonicalNamesTx(tx *gorm.DB, actressID uint, previous *mo
 			previousKeys[key] = struct{}{}
 		}
 	}
+	provenOwnerID := previous.ID
+	if provenOwnerID == 0 && sourceActressID == targetActressID {
+		provenOwnerID = actressID
+	}
+	if provenOwnerID != sourceActressID && provenOwnerID != targetActressID {
+		return fmt.Errorf("canonical transition snapshot actress %d is not merge source %d or target %d: %w", provenOwnerID, sourceActressID, targetActressID, ErrActressAliasOwnershipConflict)
+	}
 	for _, oldName := range previousNames {
 		oldName = strings.TrimSpace(oldName)
 		key := models.NormalizeActressNameKey(oldName)
 		if _, unchanged := currentKeys[key]; unchanged {
 			continue
 		}
-		if err := retargetProvenCanonicalAliasesTx(tx, oldName, newCanonical, previousKeys); err != nil {
+		if err := retargetProvenCanonicalAliasesTx(tx, sourceActressID, targetActressID, oldName, newCanonical, previousKeys); err != nil {
 			return wrapDBErr("retarget", fmt.Sprintf("actress aliases for %d", actressID), err)
 		}
 		existing, err := normalizedActressAliasesTx(tx, oldName)

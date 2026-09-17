@@ -81,9 +81,9 @@ func normalizedAliasesForCanonicalTx(tx *gorm.DB, canonicalName string) ([]model
 	return aliases, nil
 }
 
-func retargetProvenCanonicalAliasesTx(tx *gorm.DB, oldCanonicalName, newCanonicalName string, provenOwnerKeys map[string]struct{}) error {
+func retargetProvenCanonicalAliasesTx(tx *gorm.DB, sourceActressID, targetActressID uint, oldCanonicalName, newCanonicalName string, provenOwnerKeys map[string]struct{}) error {
 	oldKey := models.NormalizeActressNameKey(oldCanonicalName)
-	if _, proven := provenOwnerKeys[oldKey]; oldKey == "" || !proven {
+	if _, proven := provenOwnerKeys[oldKey]; sourceActressID == 0 || targetActressID == 0 || oldKey == "" || !proven {
 		return fmt.Errorf("retarget actress aliases from %q: %w", oldCanonicalName, ErrActressAliasOwnershipConflict)
 	}
 	aliases, err := normalizedAliasesForCanonicalTx(tx, oldCanonicalName)
@@ -92,6 +92,24 @@ func retargetProvenCanonicalAliasesTx(tx *gorm.DB, oldCanonicalName, newCanonica
 	}
 	if len(aliases) == 0 {
 		return nil
+	}
+	// A canonical string is not identity. Prove that every actress exposing
+	// this representation is one of the two IDs being coalesced before moving
+	// any aliases. For a rename, source and target are the same ID.
+	allowedOwnerIDs := map[uint]struct{}{sourceActressID: {}, targetActressID: {}}
+	var identities []models.Actress
+	if err := tx.Unscoped().Find(&identities).Error; err != nil {
+		return wrapDBErr("verify", fmt.Sprintf("unique actress alias owner %d", sourceActressID), err)
+	}
+	for i := range identities {
+		if _, allowed := allowedOwnerIDs[identities[i].ID]; allowed {
+			continue
+		}
+		for _, representation := range canonicalActressRepresentations(&identities[i]) {
+			if models.NormalizeActressNameKey(representation) == oldKey {
+				return fmt.Errorf("retarget actress aliases from %q shared by actresses %d and %d: %w", oldCanonicalName, sourceActressID, identities[i].ID, ErrActressAliasOwnershipConflict)
+			}
+		}
 	}
 	ids := make([]uint, len(aliases))
 	for i := range aliases {

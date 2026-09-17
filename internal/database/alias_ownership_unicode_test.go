@@ -159,6 +159,13 @@ func TestAliasOwnerConflictErrorContainsActionableOwners(t *testing.T) {
 	require.Contains(t, err.Error(), "Owner B")
 }
 
+func TestAliasClaimDatabaseLockFailsClosed(t *testing.T) {
+	db := newCreditTestDB(t)
+	require.NoError(t, db.Exec("CREATE TRIGGER lock_alias_claim BEFORE INSERT ON actress_aliases BEGIN SELECT RAISE(ABORT, 'database is locked'); END").Error)
+	err := NewActressAliasRepository(db).Create(t.Context(), &models.ActressAlias{AliasName: "Locked Alias", CanonicalName: "Owner"})
+	require.ErrorIs(t, err, ErrActressAliasOwnershipConflict)
+}
+
 func TestConcurrentNormalizedAliasClaimsFailClosed(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "concurrent-alias.db")
 	cfg := &Config{Type: "sqlite", DSN: path, LogLevel: "silent"}
@@ -198,10 +205,113 @@ func TestConcurrentNormalizedAliasClaimsFailClosed(t *testing.T) {
 	require.Equal(t, rows[0].CanonicalName, found.CanonicalName)
 }
 
+func TestCanonicalRetargetRejectsHomonymousIdentityAndRollsBack(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := NewActressRepository(db)
+	first := models.Actress{DMMID: 88001, JapaneseName: "Shared Name", Verified: true, Origin: ActressOriginUser}
+	second := models.Actress{DMMID: 88002, JapaneseName: "Shared Name", Verified: true, Origin: ActressOriginUser}
+	require.NoError(t, db.Create(&first).Error)
+	require.NoError(t, db.Create(&second).Error)
+	alias := models.ActressAlias{AliasName: "Second Only Alias", CanonicalName: "Shared Name"}
+	require.NoError(t, NewActressAliasRepository(db).Create(t.Context(), &alias))
+
+	err := repo.RenameNameFields(t.Context(), first.ID, "", "", "First Renamed")
+	require.ErrorIs(t, err, ErrActressAliasOwnershipConflict)
+
+	var storedFirst models.Actress
+	require.NoError(t, db.First(&storedFirst, first.ID).Error)
+	require.Equal(t, "Shared Name", storedFirst.JapaneseName)
+	var storedAlias models.ActressAlias
+	require.NoError(t, db.First(&storedAlias, alias.ID).Error)
+	require.Equal(t, "Shared Name", storedAlias.CanonicalName)
+}
+
+func TestMergeCanonicalRetargetRejectsThirdHomonymAndRollsBack(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := NewActressRepository(db)
+	target := models.Actress{DMMID: 88101, JapaneseName: "Merge Target", Verified: true, Origin: ActressOriginUser}
+	source := models.Actress{DMMID: 88102, JapaneseName: "Shared Source", Verified: true, Origin: ActressOriginUser}
+	homonym := models.Actress{DMMID: 88103, JapaneseName: "Ｓｈａｒｅｄ　Ｓｏｕｒｃｅ", Verified: true, Origin: ActressOriginUser}
+	for _, actress := range []*models.Actress{&target, &source, &homonym} {
+		require.NoError(t, db.Create(actress).Error)
+	}
+	alias := models.ActressAlias{AliasName: "Source Only Alias", CanonicalName: source.JapaneseName}
+	require.NoError(t, NewActressAliasRepository(db).Create(t.Context(), &alias))
+	movie := models.Movie{ContentID: "homonym-merge-rollback", RenderGeneration: 17}
+	require.NoError(t, db.Create(&movie).Error)
+	require.NoError(t, db.Create(&models.MovieCredit{
+		MovieContentID: movie.ContentID, ActressID: source.ID, CreditedName: source.JapaneseName,
+	}).Error)
+
+	_, err := repo.Merge(t.Context(), target.ID, source.ID, map[string]string{"japanese_name": "target"})
+	require.ErrorIs(t, err, ErrActressAliasOwnershipConflict)
+
+	for _, expected := range []models.Actress{target, source, homonym} {
+		var stored models.Actress
+		require.NoError(t, db.First(&stored, expected.ID).Error)
+		require.Equal(t, expected.JapaneseName, stored.JapaneseName)
+	}
+	var storedAlias models.ActressAlias
+	require.NoError(t, db.First(&storedAlias, alias.ID).Error)
+	require.Equal(t, source.JapaneseName, storedAlias.CanonicalName)
+	var storedMovie models.Movie
+	require.NoError(t, db.First(&storedMovie, "content_id = ?", movie.ContentID).Error)
+	require.Equal(t, int64(17), storedMovie.RenderGeneration)
+	require.False(t, storedMovie.RenderDirty)
+}
+
+func TestMergeCanonicalRetargetUsesExplicitSourceAndLeavesOtherIdentityUntouched(t *testing.T) {
+	db := newCreditTestDB(t)
+	repo := NewActressRepository(db)
+	target := models.Actress{DMMID: 88201, JapaneseName: "Merge Target", Verified: true, Origin: ActressOriginUser}
+	source := models.Actress{DMMID: 88202, JapaneseName: "Merge Source", Verified: true, Origin: ActressOriginUser}
+	other := models.Actress{DMMID: 88203, JapaneseName: "Other Source", Verified: true, Origin: ActressOriginUser}
+	for _, actress := range []*models.Actress{&target, &source, &other} {
+		require.NoError(t, db.Create(actress).Error)
+	}
+	sourceAlias := models.ActressAlias{AliasName: "Source Alias", CanonicalName: source.JapaneseName}
+	otherAlias := models.ActressAlias{AliasName: "Other Alias", CanonicalName: other.JapaneseName}
+	require.NoError(t, NewActressAliasRepository(db).Create(t.Context(), &sourceAlias))
+	require.NoError(t, NewActressAliasRepository(db).Create(t.Context(), &otherAlias))
+
+	_, err := repo.Merge(t.Context(), target.ID, source.ID, map[string]string{"japanese_name": "target"})
+	require.NoError(t, err)
+
+	require.ErrorIs(t, db.First(&models.Actress{}, source.ID).Error, gorm.ErrRecordNotFound)
+	var storedSourceAlias, storedOtherAlias models.ActressAlias
+	require.NoError(t, db.First(&storedSourceAlias, sourceAlias.ID).Error)
+	require.Equal(t, target.JapaneseName, storedSourceAlias.CanonicalName)
+	require.NoError(t, db.First(&storedOtherAlias, otherAlias.ID).Error)
+	require.Equal(t, other.JapaneseName, storedOtherAlias.CanonicalName)
+	var storedOther models.Actress
+	require.NoError(t, db.First(&storedOther, other.ID).Error)
+	require.Equal(t, other.JapaneseName, storedOther.JapaneseName)
+}
+
 func TestRetargetProvenCanonicalAliasesRejectsUnprovenOwner(t *testing.T) {
 	db := newCreditTestDB(t)
-	err := retargetProvenCanonicalAliasesTx(db.DB, "Owner A", "Owner B", map[string]struct{}{})
+	err := retargetProvenCanonicalAliasesTx(db.DB, 0, 0, "Owner A", "Owner B", map[string]struct{}{})
 	require.ErrorIs(t, err, ErrActressAliasOwnershipConflict)
+}
+
+func TestCanonicalRetargetIdentityProofFailureContracts(t *testing.T) {
+	t.Run("owner verification query", func(t *testing.T) {
+		db := newCreditTestDB(t)
+		owner := models.Actress{JapaneseName: "Old Owner", Verified: true, Origin: ActressOriginUser}
+		require.NoError(t, db.Create(&owner).Error)
+		require.NoError(t, db.Create(&models.ActressAlias{AliasName: "Old Alias", CanonicalName: owner.JapaneseName}).Error)
+		injectDatabaseCallbackError(t, db, "query", "actresses", 1)
+		err := retargetProvenCanonicalAliasesTx(db.DB, owner.ID, owner.ID, owner.JapaneseName, "New Owner", map[string]struct{}{models.NormalizeActressNameKey(owner.JapaneseName): {}})
+		require.ErrorContains(t, err, "verify unique actress alias owner")
+	})
+
+	t.Run("snapshot outside merge pair", func(t *testing.T) {
+		db := newCreditTestDB(t)
+		target := models.Actress{JapaneseName: "New Owner", Verified: true, Origin: ActressOriginUser}
+		require.NoError(t, db.Create(&target).Error)
+		err := transitionActressCanonicalNamesForMergeTx(db.DB, target.ID, target.ID+1, &models.Actress{ID: target.ID + 2, JapaneseName: "Old Owner"})
+		require.ErrorIs(t, err, ErrActressAliasOwnershipConflict)
+	})
 }
 
 func TestCandidateNameKeyNFKCBackfillAndConflictFailClosed(t *testing.T) {
