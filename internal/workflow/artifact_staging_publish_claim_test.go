@@ -16,12 +16,14 @@ import (
 
 type pr260PublicationFaultOrganizer struct {
 	*organizer.Organizer
-	planCalls     int
-	failPlanAt    int
-	failExecute   bool
-	noResult      bool
-	missingSource bool
-	emptyFolder   bool
+	planCalls       int
+	failPlanAt      int
+	failExecute     bool
+	noResult        bool
+	missingSource   bool
+	emptyFolder     bool
+	changeGuardPath bool
+	afterExecute    func(*organizer.OrganizePlan, *organizer.OrganizeResult)
 }
 
 func (o *pr260PublicationFaultOrganizer) PlanOrganize(ctx context.Context, cmd organizer.OrganizeCmd) (*organizer.OrganizePlan, error) {
@@ -29,7 +31,11 @@ func (o *pr260PublicationFaultOrganizer) PlanOrganize(ctx context.Context, cmd o
 	if o.planCalls == o.failPlanAt {
 		return nil, errors.New("publication plan denied")
 	}
-	return o.Organizer.PlanOrganize(ctx, cmd)
+	plan, err := o.Organizer.PlanOrganize(ctx, cmd)
+	if err == nil && o.changeGuardPath && o.planCalls == 2 {
+		plan.TargetPath += ".changed"
+	}
+	return plan, err
 }
 func (o *pr260PublicationFaultOrganizer) PlanSourceExists(p *organizer.OrganizePlan) bool {
 	if o.missingSource {
@@ -45,6 +51,9 @@ func (o *pr260PublicationFaultOrganizer) ExecuteOrganizePlan(p *organizer.Organi
 		return nil, nil
 	}
 	result, err := o.Organizer.ExecuteOrganizePlan(p, move, link)
+	if result != nil && o.afterExecute != nil {
+		o.afterExecute(p, result)
+	}
 	if result != nil && o.emptyFolder {
 		result.FolderPath = ""
 	}
