@@ -171,36 +171,60 @@ func backfillActressAliasNameKeys(ctx context.Context, db *gorm.DB) error {
 // normalization algorithm change. Equivalent legacy candidates are preserved,
 // quarantined, and left keyless so lookup can detect and reject the ambiguity.
 func backfillActressCandidateNameKeys(ctx context.Context, db *gorm.DB) error {
-	var candidates []models.Actress
-	if err := db.WithContext(ctx).Where("verified = ? AND name_key IS NOT NULL AND name_key <> ?", false, "").Order("id").Find(&candidates).Error; err != nil {
-		return wrapDBErr("list", "actress candidates for normalized-key backfill", err)
-	}
-	groups := make(map[string][]uint)
-	for i := range candidates {
-		key := actressNameKey(&candidates[i])
-		if key != "" {
-			groups[key] = append(groups[key], candidates[i].ID)
-		}
-	}
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if len(candidates) > 0 {
-			ids := make([]uint, len(candidates))
-			for i := range candidates {
-				ids[i] = candidates[i].ID
+		var candidates []models.Actress
+		if err := tx.Where("verified = ?", false).Order("id").Find(&candidates).Error; err != nil {
+			return wrapDBErr("list", "actress candidates for normalized-key backfill", err)
+		}
+
+		groups := make(map[string]map[uint]struct{})
+		for i := range candidates {
+			for key := range candidateEvidenceKeys(&candidates[i]) {
+				if groups[key] == nil {
+					groups[key] = make(map[uint]struct{})
+				}
+				groups[key][candidates[i].ID] = struct{}{}
 			}
-			if err := tx.Model(&models.Actress{}).Where("id IN ?", ids).UpdateColumn("name_key", nil).Error; err != nil {
+		}
+		ambiguous := make(map[uint]struct{})
+		for _, ids := range groups {
+			if len(ids) < 2 {
+				continue
+			}
+			for id := range ids {
+				ambiguous[id] = struct{}{}
+			}
+		}
+
+		keyedIDs := make([]uint, 0, len(candidates))
+		for i := range candidates {
+			if candidates[i].NameKey != "" {
+				keyedIDs = append(keyedIDs, candidates[i].ID)
+			}
+		}
+		if len(keyedIDs) > 0 {
+			if err := tx.Model(&models.Actress{}).Where("id IN ?", keyedIDs).UpdateColumn("name_key", nil).Error; err != nil {
 				return wrapDBErr("clear", "legacy actress candidate normalized keys", err)
 			}
 		}
-		for key, ids := range groups {
-			if len(ids) == 1 {
-				if err := tx.Model(&models.Actress{}).Where("id = ?", ids[0]).UpdateColumn("name_key", key).Error; err != nil {
-					return wrapDBErr("backfill", fmt.Sprintf("actress candidate %d normalized key", ids[0]), err)
+
+		for i := range candidates {
+			candidate := &candidates[i]
+			if _, conflict := ambiguous[candidate.ID]; conflict {
+				if err := tx.Model(&models.Actress{}).Where("id = ?", candidate.ID).UpdateColumn(colAmbiguityQuarantined, true).Error; err != nil {
+					return wrapDBErr("quarantine", fmt.Sprintf("actress candidate %d normalized representations", candidate.ID), err)
 				}
 				continue
 			}
-			if err := tx.Model(&models.Actress{}).Where("id IN ?", ids).UpdateColumn(colAmbiguityQuarantined, true).Error; err != nil {
-				return wrapDBErr("quarantine", fmt.Sprintf("%d equivalent actress candidates for key %q", len(ids), key), err)
+			// Positive-DMM candidates are intentionally keyless: DMM is their
+			// identity evidence, while names remain usable for ambiguity scans.
+			if candidate.DMMID > 0 || candidate.AmbiguityQuarantined {
+				continue
+			}
+			if key := actressNameKey(candidate); key != "" {
+				if err := tx.Model(&models.Actress{}).Where("id = ?", candidate.ID).UpdateColumn("name_key", key).Error; err != nil {
+					return wrapDBErr("backfill", fmt.Sprintf("actress candidate %d normalized key", candidate.ID), err)
+				}
 			}
 		}
 		return nil

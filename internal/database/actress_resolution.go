@@ -151,35 +151,60 @@ func filterDMMlessActresses(actresses []models.Actress) []models.Actress {
 	return filtered
 }
 
-func findCandidateByNameKeyTx(tx *gorm.DB, nameKey string) (*models.Actress, error) {
-	if nameKey == "" {
-		return nil, gorm.ErrRecordNotFound
-	}
-	var found models.Actress
-	err := tx.Where("verified = ? AND name_key = ?", false, nameKey).First(&found).Error
-	if err == nil {
-		return &found, nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-	// A normalization migration leaves equivalent legacy conflicts keyless
-	// rather than deleting an identity or selecting an arbitrary owner.
-	var keyless []models.Actress
-	if err := tx.Where("verified = ? AND (name_key IS NULL OR name_key = ?)", false, "").Order("id").Find(&keyless).Error; err != nil {
-		return nil, err
-	}
-	var matches []models.Actress
-	for i := range keyless {
-		if actressNameKey(&keyless[i]) == nameKey {
-			matches = append(matches, keyless[i])
+func candidateEvidenceKeys(candidate *models.Actress) map[string]struct{} {
+	keys := canonicalActressRepresentationKeys(candidate)
+	if candidate != nil {
+		if key := models.NormalizeActressNameKey(candidate.NameKey); key != "" {
+			keys[key] = struct{}{}
 		}
 	}
+	return keys
+}
+
+func findCandidateByNameEvidenceTx(tx *gorm.DB, incoming *models.Actress) (*models.Actress, error) {
+	incomingKeys := candidateEvidenceKeys(incoming)
+	if len(incomingKeys) == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+
+	// Load the complete candidate set. A candidate may intentionally be keyless
+	// (positive DMM evidence), or its indexed primary key may differ while an
+	// alternate JP/LF/FL representation matches the incoming evidence.
+	var candidates []models.Actress
+	if err := tx.Where("verified = ?", false).Order("id").Find(&candidates).Error; err != nil {
+		return nil, err
+	}
+	matches := make(map[uint]models.Actress, 2)
+	for i := range candidates {
+		candidate := &candidates[i]
+		if incoming.DMMID > 0 && candidate.DMMID > 0 && candidate.DMMID != incoming.DMMID {
+			continue
+		}
+		candidateKeys := candidateEvidenceKeys(candidate)
+		matched := false
+		for key := range incomingKeys {
+			if _, ok := candidateKeys[key]; ok {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+		// IDs are the identity boundary. Map assignment keeps the union
+		// deduplicated even if its query shape later gains overlapping arms.
+		matches[candidate.ID] = *candidate
+	}
 	if len(matches) > 1 {
-		return nil, fmt.Errorf("candidate name key %q matches %d preserved identities: %w", nameKey, len(matches), ErrActressCandidateAmbiguous)
+		return nil, fmt.Errorf("candidate name evidence matches %d preserved identities: %w", len(matches), ErrActressCandidateAmbiguous)
 	}
 	if len(matches) == 1 {
-		return &matches[0], nil
+		for _, match := range matches {
+			if match.AmbiguityQuarantined {
+				return nil, fmt.Errorf("candidate name evidence matches a durably quarantined identity: %w", ErrActressCandidateAmbiguous)
+			}
+			return &match, nil
+		}
 	}
 	return nil, gorm.ErrRecordNotFound
 }
@@ -224,7 +249,7 @@ func resolveAmbiguousCandidateTx(tx *gorm.DB, scraped *models.Actress, nameKey s
 	if nameKey == "" {
 		return nil, fmt.Errorf("resolve actress identity: ambiguous match with empty name key")
 	}
-	candidate, err := findCandidateByNameKeyTx(tx, nameKey)
+	candidate, err := findCandidateByNameEvidenceTx(tx, scraped)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, wrapDBErr("resolve candidate", nameKey, err)
 	}
@@ -254,8 +279,8 @@ func createCandidateTx(tx *gorm.DB, scraped *models.Actress, nameKey string) (*m
 			}
 		}
 		if candidate.NameKey != "" {
-			if ferr := tx.Where("verified = ? AND name_key = ?", false, candidate.NameKey).First(&found).Error; ferr == nil {
-				candidate = found
+			if matched, ferr := findCandidateByNameEvidenceTx(tx, &candidate); ferr == nil {
+				candidate = *matched
 				return nil
 			}
 		}
@@ -357,7 +382,7 @@ func ResolveActressIdentityTx(tx *gorm.DB, scraped *models.Actress) (*models.Act
 	}
 
 	if nameKey != "" {
-		candidate, err := findCandidateByNameKeyTx(tx, nameKey)
+		candidate, err := findCandidateByNameEvidenceTx(tx, scraped)
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ResolutionCandidateLinked, wrapDBErr("resolve candidate", nameKey, err)
 		}

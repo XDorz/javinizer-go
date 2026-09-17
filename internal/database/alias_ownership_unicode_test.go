@@ -447,7 +447,7 @@ func TestKeylessCandidateFallbackContracts(t *testing.T) {
 		db := newCreditTestDB(t)
 		candidate := models.Actress{JapaneseName: "が", Origin: ActressOriginScrape}
 		require.NoError(t, db.Create(&candidate).Error)
-		found, err := findCandidateByNameKeyTx(db.DB, models.NormalizeActressNameKey("か\u3099"))
+		found, err := findCandidateByNameEvidenceTx(db.DB, &models.Actress{JapaneseName: "か\u3099"})
 		require.NoError(t, err)
 		require.Equal(t, candidate.ID, found.ID)
 	})
@@ -455,7 +455,7 @@ func TestKeylessCandidateFallbackContracts(t *testing.T) {
 	t.Run("fallback query error", func(t *testing.T) {
 		db := newCreditTestDB(t)
 		injectDatabaseCallbackError(t, db, "query", "actresses", 2)
-		_, err := findCandidateByNameKeyTx(db.DB, "missing")
+		_, err := findCandidateByNameEvidenceTx(db.DB, &models.Actress{JapaneseName: "missing"})
 		require.Error(t, err)
 	})
 }

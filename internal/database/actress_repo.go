@@ -744,26 +744,55 @@ func fillEmptyActressFields(existing, incoming *models.Actress) {
 // DeleteStaleCandidates prunes unverified candidates older than the given
 // time that hold no credits and no aliases. Returns the pruned count.
 func (r *ActressRepository) DeleteStaleCandidates(ctx context.Context, olderThan time.Time) (int64, error) {
-	res := r.GetDB().WithContext(ctx).Exec(`
+	var pruned int64
+	err := r.GetDB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var candidates []models.Actress
+		if err := tx.Where("verified = ? AND updated_at < ?", false, olderThan).Order("id").Find(&candidates).Error; err != nil {
+			return wrapDBErr("list", "stale candidates", err)
+		}
+		for i := range candidates {
+			keys := make([]string, 0, 3)
+			for key := range canonicalActressRepresentationKeys(&candidates[i]) {
+				keys = append(keys, key)
+			}
+			query := `
 DELETE FROM actresses
-WHERE verified = 0
+WHERE id = ?
+  AND verified = 0
   AND updated_at < ?
   AND id NOT IN (SELECT DISTINCT actress_id FROM movie_credits)
   AND NOT EXISTS (
-      SELECT 1 FROM actress_aliases al
-      WHERE al.canonical_name = actresses.japanese_name
-         OR al.canonical_name = (actresses.last_name || ' ' || actresses.first_name)
-         OR al.canonical_name = (actresses.first_name || ' ' || actresses.last_name)
-  )
-  AND NOT EXISTS (
       SELECT 1 FROM movie_credit_reassignments mr
       WHERE mr.source_actress_id = actresses.id
-  )
-`, olderThan)
-	if res.Error != nil {
-		return 0, wrapDBErr("delete", "stale candidates", res.Error)
+         OR mr.target_actress_id = actresses.id
+  )`
+			args := []interface{}{candidates[i].ID, olderThan}
+			if len(keys) > 0 {
+				query += `
+  AND NOT EXISTS (
+      SELECT 1 FROM actress_aliases al
+      WHERE al.canonical_name_key IN ?
+  )`
+				args = append(args, keys)
+			}
+			res := tx.Exec(query, args...)
+			if res.Error != nil {
+				return wrapDBErr("delete", fmt.Sprintf("stale candidate %d", candidates[i].ID), res.Error)
+			}
+			if res.RowsAffected == 0 {
+				continue
+			}
+			if err := tx.Where("actress_id = ?", candidates[i].ID).Delete(&models.ActressTranslation{}).Error; err != nil {
+				return wrapDBErr("delete", fmt.Sprintf("translations for stale candidate %d", candidates[i].ID), err)
+			}
+			pruned += res.RowsAffected
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
 	}
-	return res.RowsAffected, nil
+	return pruned, nil
 }
 
 func resolveCandidateIdentityCollisionsTx(tx *gorm.DB, actressID uint) error {
