@@ -447,6 +447,11 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 			return wrapDBErr("merge", fmt.Sprintf("movie credits from %d to %d", sourceID, targetID), err)
 		}
 
+		if merged.Verified {
+			if err := resolveCandidateIdentityCollisionsTx(tx, targetID); err != nil {
+				return err
+			}
+		}
 		if err := reconcileActressCollisionsTx(tx, targetID); err != nil {
 			return err
 		}

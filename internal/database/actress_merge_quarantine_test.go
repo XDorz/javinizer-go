@@ -185,3 +185,38 @@ func TestMergeAssociationAndProjectionFailuresRemainAtomic(t *testing.T) {
 		require.True(t, verifiedAfter.Verified)
 	})
 }
+
+func TestVerifiedMergeFieldReconcileFailureRollsBack(t *testing.T) {
+	ctx := context.Background()
+	db := newCreditTestDB(t)
+	repo := NewActressRepository(db)
+	target := models.Actress{FirstName: "Target", Verified: true, Origin: ActressOriginUser}
+	source := models.Actress{FirstName: "Source", Verified: true, Origin: ActressOriginUser}
+	require.NoError(t, db.Create(&target).Error)
+	require.NoError(t, db.Create(&source).Error)
+	movie := models.Movie{ContentID: "merge-reconcile-rollback", ID: "merge-reconcile-rollback", Title: "rollback", RenderGeneration: 9}
+	require.NoError(t, db.Create(&movie).Error)
+	credit := models.MovieCredit{MovieContentID: movie.ContentID, ActressID: source.ID, CreditedName: "Reported", Origin: string(models.CreditOriginScrape)}
+	require.NoError(t, db.Create(&credit).Error)
+	collision := models.CreditCollision{CreditID: credit.ID, MovieContentID: movie.ContentID, Field: models.CreditFieldCreditedName, ReportedValue: "Reported", Status: models.CollisionStatusOpen}
+	require.NoError(t, db.Create(&collision).Error)
+	plan, err := repo.merger.PlanMerge(ctx, target.ID, source.ID, nil)
+	require.NoError(t, err)
+	// The first collision update is verified identity closure; fail the following
+	// field-local reconciliation to prove the later transition remains atomic.
+	injectDatabaseCallbackError(t, db, "update", "credit_collisions", 2)
+
+	_, err = repo.merger.ExecuteMerge(ctx, plan, db)
+	require.Error(t, err)
+	var sourceAfter models.Actress
+	require.NoError(t, db.First(&sourceAfter, source.ID).Error)
+	var creditAfter models.MovieCredit
+	require.NoError(t, db.First(&creditAfter, credit.ID).Error)
+	require.Equal(t, source.ID, creditAfter.ActressID)
+	var collisionAfter models.CreditCollision
+	require.NoError(t, db.First(&collisionAfter, collision.ID).Error)
+	require.Equal(t, models.CollisionStatusOpen, collisionAfter.Status)
+	var movieAfter models.Movie
+	require.NoError(t, db.First(&movieAfter, "content_id = ?", movie.ContentID).Error)
+	require.Equal(t, movie.RenderGeneration, movieAfter.RenderGeneration)
+}
