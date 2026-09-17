@@ -438,7 +438,10 @@ func reconcileActressCollisionsTx(tx *gorm.DB, actressID uint) error {
 			"canonical_value": canonicalValue,
 			colUpdatedAt:      time.Now().UTC(),
 		}
-		if collision.Status == models.CollisionStatusOpen && !collision.UserPinned && matches {
+		if collision.Field == models.CreditFieldIdentityLink && actress.AmbiguityQuarantined {
+			updates[colStatus] = models.CollisionStatusOpen
+			updates[colResolution] = ""
+		} else if collision.Status == models.CollisionStatusOpen && !collision.UserPinned && matches {
 			updates[colStatus] = models.CollisionStatusResolved
 			updates[colResolution] = models.CollisionResolutionAdoptCanonical
 		}

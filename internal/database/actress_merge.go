@@ -395,12 +395,14 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 		if err := tx.First(&previousTarget, targetID).Error; err != nil {
 			return wrapDBErr("load", fmt.Sprintf("merge target actress %d", targetID), err)
 		}
+		merged.Verified = previousTarget.Verified || source.Verified
+		if source.Verified && !previousTarget.Verified {
+			merged.Origin = source.Origin
+		}
+		merged.AmbiguityQuarantined = !merged.Verified && (previousTarget.AmbiguityQuarantined || source.AmbiguityQuarantined)
 		if merged.DMMID > 0 && merged.DMMID == source.DMMID {
 			if previousTarget.DMMID != source.DMMID {
 				tempDMMID := -int(sourceID)
-				if tempDMMID == 0 {
-					tempDMMID = -1
-				}
 				if err := tx.Model(&models.Actress{}).Where("id = ?", sourceID).Update(colDMMID, tempDMMID).Error; err != nil {
 					return wrapDBErr("update", fmt.Sprintf("merge actress %d temp dmm_id", sourceID), err)
 				}
@@ -414,7 +416,9 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 			colJapaneseName:         merged.JapaneseName,
 			"thumb_url":             merged.ThumbURL,
 			"aliases":               merged.Aliases,
-			colAmbiguityQuarantined: false,
+			colVerified:             merged.Verified,
+			colOrigin:               merged.Origin,
+			colAmbiguityQuarantined: merged.AmbiguityQuarantined,
 			colUpdatedAt:            time.Now().UTC(),
 		}).Error; err != nil {
 			if errors.Is(err, gorm.ErrDuplicatedKey) {
@@ -445,6 +449,11 @@ func (m *actressMerger) ExecuteMerge(ctx context.Context, plan *MergePlan, db *D
 
 		if err := reconcileActressCollisionsTx(tx, targetID); err != nil {
 			return err
+		}
+		if merged.Verified {
+			if err := restoreActressProjectionTx(tx, targetID); err != nil {
+				return err
+			}
 		}
 
 		if err := moveCreditReassignmentsTx(tx, sourceID, targetID); err != nil {

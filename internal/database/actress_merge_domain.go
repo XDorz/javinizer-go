@@ -217,6 +217,11 @@ func sourceAliasesForUpsert(sourceCandidates []string, canonicalName string) []s
 // Returns merged actress or error if resolution is invalid.
 func mergeActressValues(target, source *models.Actress, resolutions map[string]string) (models.Actress, error) {
 	merged := *target
+	if source.Verified && !target.Verified {
+		merged.Verified = true
+		merged.Origin = source.Origin
+	}
+	merged.AmbiguityQuarantined = !merged.Verified && (target.AmbiguityQuarantined || source.AmbiguityQuarantined)
 
 	conflicts := buildActressMergeConflicts(target, source)
 	conflictSet := make(map[string]bool, len(conflicts))
