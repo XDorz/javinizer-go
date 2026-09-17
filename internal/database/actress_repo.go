@@ -160,6 +160,9 @@ func (r *ActressRepository) Delete(ctx context.Context, id uint) error {
 		if err := tx.Exec("DELETE FROM movie_actresses WHERE actress_id = ?", id).Error; err != nil {
 			return wrapDBErr("delete", fmt.Sprintf("legacy actress associations for %d", id), err)
 		}
+		if err := tx.Where("actress_id = ?", id).Delete(&models.ActressTranslation{}).Error; err != nil {
+			return wrapDBErr("delete", fmt.Sprintf("translations for actress %d", id), err)
+		}
 		if err := tx.Delete(&models.Actress{}, id).Error; err != nil {
 			return wrapDBErr("delete", fmt.Sprintf("actress %d", id), err)
 		}

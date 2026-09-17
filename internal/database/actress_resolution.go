@@ -327,30 +327,21 @@ func ResolveActressIdentityTx(tx *gorm.DB, scraped *models.Actress) (*models.Act
 	if err != nil {
 		return nil, ResolutionMatched, wrapDBErr("resolve alias", actressNameKey(scraped), err)
 	}
-	if scraped.DMMID > 0 {
-		aliasMatches = filterDMMlessActresses(aliasMatches)
-	}
-	if len(aliasMatches) == 1 {
-		if scraped.DMMID > 0 {
-			return quarantinePositiveDMMNameMatchTx(tx, scraped)
-		}
-		return &aliasMatches[0], ResolutionMatched, nil
-	}
-	if len(aliasMatches) > 1 {
-		nameKey := actressNameKey(scraped)
-		candidate, cerr := resolveAmbiguousCandidateTx(tx, scraped, nameKey)
-		if cerr != nil {
-			return nil, ResolutionAmbiguous, cerr
-		}
-		return candidate, ResolutionAmbiguous, nil
-	}
-
-	verifiedMatches, err := findVerifiedByNameTx(tx, scraped.JapaneseName, scraped.FirstName, scraped.LastName)
+	canonicalMatches, err := findVerifiedByNameTx(tx, scraped.JapaneseName, scraped.FirstName, scraped.LastName)
 	if err != nil {
 		return nil, ResolutionMatched, wrapDBErr("resolve name", actressNameKey(scraped), err)
 	}
 	if scraped.DMMID > 0 {
-		verifiedMatches = filterDMMlessActresses(verifiedMatches)
+		aliasMatches = filterDMMlessActresses(aliasMatches)
+		canonicalMatches = filterDMMlessActresses(canonicalMatches)
+	}
+	verifiedByID := make(map[uint]models.Actress, len(aliasMatches)+len(canonicalMatches))
+	for _, match := range append(aliasMatches, canonicalMatches...) {
+		verifiedByID[match.ID] = match
+	}
+	verifiedMatches := make([]models.Actress, 0, len(verifiedByID))
+	for _, match := range verifiedByID {
+		verifiedMatches = append(verifiedMatches, match)
 	}
 	if len(verifiedMatches) == 1 {
 		if scraped.DMMID > 0 {
