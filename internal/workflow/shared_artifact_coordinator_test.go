@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -294,11 +294,16 @@ func TestSharedArtifactCoordinatorTransientProbeRecoveryKeepsClaimStable(t *test
 func TestSharedArtifactCoordinatorRelativeAbsoluteAndDotAliasesShareBucket(t *testing.T) {
 	cwd, err := os.Getwd()
 	require.NoError(t, err)
-	root := t.TempDir()
-	relative, err := filepath.Rel(cwd, filepath.Join(root, "movie.nfo"))
+	root, err := os.MkdirTemp(".", ".shared-artifact-coordinator-")
 	require.NoError(t, err)
-	absolute := filepath.Join(root, "movie.nfo")
-	dotted := filepath.Join(root, ".", "sub", "..", "movie.nfo")
+	t.Cleanup(func() { require.NoError(t, os.RemoveAll(root)) })
+
+	absolute, err := filepath.Abs(filepath.Join(root, "movie.nfo"))
+	require.NoError(t, err)
+	relative, err := filepath.Rel(cwd, absolute)
+	require.NoError(t, err)
+	dotted := filepath.Dir(absolute) + string(filepath.Separator) + "." + string(filepath.Separator) +
+		"sub" + string(filepath.Separator) + ".." + string(filepath.Separator) + "movie.nfo"
 
 	coordinator := NewSharedArtifactCoordinator([]string{"part-1", "part-2", "part-3"})
 	first, err := coordinator.Claim(t.Context(), relative, "same", "part-1")
@@ -315,77 +320,125 @@ func TestSharedArtifactCoordinatorRelativeAbsoluteAndDotAliasesShareBucket(t *te
 	}
 }
 
-type portableSharedArtifactResolver struct {
-	windows         bool
-	caseInsensitive bool
-	inputs          []string
+func TestSharedArtifactCoordinatorWindowsExistingCaseAndSeparatorAliasesShareBucket(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("requires the Windows runtime and its case-insensitive temporary filesystem")
+	}
+
+	root := t.TempDir()
+	directory := filepath.Join(root, "Library")
+	require.NoError(t, os.Mkdir(directory, 0o755))
+	firstPath := filepath.Join(directory, "Poster.jpg")
+	require.NoError(t, os.WriteFile(firstPath, []byte("poster"), 0o600))
+	secondPath := filepath.ToSlash(filepath.Join(root, "library", "poster.JPG"))
+	_, err := os.Stat(secondPath)
+	require.NoError(t, err, "both spellings must resolve to the existing file before testing coordination")
+
+	coordinator := NewSharedArtifactCoordinator([]string{"part-1", "part-2"})
+	first, err := coordinator.Claim(t.Context(), firstPath, "same", "part-1")
+	require.NoError(t, err)
+	require.True(t, first.OwnsPublication())
+	coordinator.Complete(first, SharedArtifactPublished)
+	coordinator.Done("part-1")
+	require.Len(t, coordinator.paths, 1)
+
+	second, err := coordinator.Claim(t.Context(), secondPath, "same", "part-2")
+	require.NoError(t, err)
+	require.False(t, second.OwnsPublication(), "the case-and-separator alias must consume the existing publication")
+	require.Equal(t, first.key, second.key, "the default resolver must derive one destination bucket")
+	require.Len(t, coordinator.paths, 1)
+	coordinator.Done("part-2")
+	require.Empty(t, coordinator.paths)
 }
 
-func (r *portableSharedArtifactResolver) Key(path string) string {
-	r.inputs = append(r.inputs, path)
-	key := filepath.ToSlash(filepath.Clean(path))
-	if r.windows {
-		key = strings.ReplaceAll(key, `\`, "/")
+func TestSharedArtifactCoordinatorPOSIXExistingPathSemantics(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires POSIX path semantics")
 	}
-	if r.caseInsensitive {
-		key = strings.ToUpper(key)
-	}
-	return key
+
+	t.Run("literal backslash is a distinct filename", func(t *testing.T) {
+		root := t.TempDir()
+		directory := filepath.Join(root, "library")
+		require.NoError(t, os.Mkdir(directory, 0o755))
+		slashPath := filepath.Join(directory, "poster.jpg")
+		backslashPath := filepath.Join(root, `library\poster.jpg`)
+		require.NoError(t, os.WriteFile(slashPath, []byte("slash"), 0o600))
+		require.NoError(t, os.WriteFile(backslashPath, []byte("backslash"), 0o600))
+
+		coordinator := NewSharedArtifactCoordinator([]string{"part-1", "part-2"})
+		first, err := coordinator.Claim(t.Context(), slashPath, "same", "part-1")
+		require.NoError(t, err)
+		require.True(t, first.OwnsPublication())
+		coordinator.Complete(first, SharedArtifactPublished)
+		coordinator.Done("part-1")
+
+		second, err := coordinator.Claim(t.Context(), backslashPath, "same", "part-2")
+		require.NoError(t, err)
+		require.True(t, second.OwnsPublication(), "a POSIX literal backslash must not become a separator")
+		require.NotEqual(t, first.key, second.key)
+		require.Len(t, coordinator.paths, 2)
+		coordinator.Complete(second, SharedArtifactPublished)
+		coordinator.Done("part-2")
+	})
+
+	t.Run("case-distinct files use distinct buckets", func(t *testing.T) {
+		root := t.TempDir()
+		upper := filepath.Join(root, "Poster.jpg")
+		lower := filepath.Join(root, "poster.jpg")
+		require.NoError(t, os.WriteFile(upper, []byte("upper"), 0o600))
+		file, err := os.OpenFile(lower, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if errors.Is(err, os.ErrExist) {
+			t.Skip("the POSIX host filesystem is case-insensitive; Windows-style alias coverage exercises that posture")
+		}
+		require.NoError(t, err)
+		require.NoError(t, file.Close())
+
+		coordinator := NewSharedArtifactCoordinator([]string{"part-1", "part-2"})
+		first, err := coordinator.Claim(t.Context(), upper, "same", "part-1")
+		require.NoError(t, err)
+		require.True(t, first.OwnsPublication())
+		coordinator.Complete(first, SharedArtifactPublished)
+		coordinator.Done("part-1")
+
+		second, err := coordinator.Claim(t.Context(), lower, "same", "part-2")
+		require.NoError(t, err)
+		require.True(t, second.OwnsPublication(), "two existing case-distinct files need separate publications")
+		require.NotEqual(t, first.key, second.key)
+		require.Len(t, coordinator.paths, 2)
+		coordinator.Complete(second, SharedArtifactPublished)
+		coordinator.Done("part-2")
+	})
 }
 
-func TestSharedArtifactCoordinatorPortableSeparatorAndCaseSemantics(t *testing.T) {
-	tests := []struct {
-		name            string
-		resolver        *portableSharedArtifactResolver
-		first, second   string
-		secondPublishes bool
-	}{
-		{
-			name: "windows separator and case aliases",
-			resolver: &portableSharedArtifactResolver{
-				windows: true, caseInsensitive: true,
-			},
-			first: `C:/Media/Poster.jpg`, second: `C:\Media\poster.jpg`,
-		},
-		{
-			name: "posix literal backslash stays distinct",
-			resolver: &portableSharedArtifactResolver{
-				windows: false, caseInsensitive: false,
-			},
-			first: `library/poster.jpg`, second: `library\poster.jpg`, secondPublishes: true,
-		},
-		{
-			name: "case-sensitive filesystem preserves spelling",
-			resolver: &portableSharedArtifactResolver{
-				caseInsensitive: false,
-			},
-			first: `library/Poster.jpg`, second: `library/poster.jpg`, secondPublishes: true,
-		},
-	}
+func TestSharedArtifactCoordinatorDefaultResolverWiresInsensitiveCaseFold(t *testing.T) {
+	root := t.TempDir()
+	upper := filepath.Join(root, "Poster.jpg")
+	lower := filepath.Join(root, "poster.jpg")
+	require.NoError(t, os.WriteFile(upper, []byte("upper"), 0o600))
+	require.NoError(t, os.WriteFile(lower, []byte("lower"), 0o600))
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			coordinator := newSharedArtifactCoordinator([]string{"part-1", "part-2"}, tc.resolver)
-			first, err := coordinator.Claim(t.Context(), tc.first, "same", "part-1")
-			require.NoError(t, err)
-			require.True(t, first.OwnsPublication())
-			coordinator.Complete(first, SharedArtifactPublished)
-			coordinator.Done("part-1")
+	previous := fsutil.CaseSensitiveProbe
+	t.Cleanup(func() {
+		fsutil.CaseSensitiveProbe = previous
+		fsutil.ResetCaseSensitivityCache()
+	})
+	fsutil.ResetCaseSensitivityCache()
+	fsutil.CaseSensitiveProbe = func(string) (bool, error) { return false, nil }
 
-			second, err := coordinator.Claim(t.Context(), tc.second, "same", "part-2")
-			require.NoError(t, err)
-			require.Equal(t, tc.secondPublishes, second.OwnsPublication())
-			if second.OwnsPublication() {
-				coordinator.Complete(second, SharedArtifactPublished)
-			}
-			coordinator.Done("part-2")
-			for _, input := range tc.resolver.inputs {
-				require.True(t, filepath.IsAbs(input), "coordinator must make %q absolute before resolver", input)
-			}
-		})
-	}
+	coordinator := NewSharedArtifactCoordinator([]string{"part-1", "part-2"})
+	first, err := coordinator.Claim(t.Context(), upper, "same", "part-1")
+	require.NoError(t, err)
+	require.True(t, first.OwnsPublication())
+	coordinator.Complete(first, SharedArtifactPublished)
+	coordinator.Done("part-1")
+
+	second, err := coordinator.Claim(t.Context(), lower, "same", "part-2")
+	require.NoError(t, err)
+	require.False(t, second.OwnsPublication(), "the coordinator default must use DestKeyResolver's case fold")
+	require.Equal(t, first.key, second.key)
+	require.Len(t, coordinator.paths, 1)
+	coordinator.Done("part-2")
 }
-
 func TestSharedArtifactCoordinatorFailedOwnerStillPinsDigest(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "movie.nfo")
 	coordinator := NewSharedArtifactCoordinator([]string{"part-1", "part-2"})
