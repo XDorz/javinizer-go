@@ -3,6 +3,7 @@ package commandutil
 import (
 	"bytes"
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -55,4 +56,31 @@ func TestRunBatchCommand_OpenCollisionBlocksCLIOrganize(t *testing.T) {
 		Where("movie_content_id = ? AND status = ?", movie.ContentID, models.CollisionStatusOpen).
 		Count(&openCount).Error)
 	assert.EqualValues(t, 1, openCount)
+}
+
+func TestRunBatchCommand_ApplyFailureIsTerminal(t *testing.T) {
+	configPath, src, dest, _ := setupSingleFileBatch(t, "GOOD-705")
+	occupied := filepath.Join(dest, "GOOD-705", "GOOD-705.mp4")
+	require.NoError(t, os.MkdirAll(filepath.Dir(occupied), 0o700))
+	require.NoError(t, os.WriteFile(occupied, []byte("occupied"), 0o600))
+
+	var buf bytes.Buffer
+	err := RunBatchCommand(context.Background(), &buf, BatchCommandOptions{
+		ConfigFile: configPath, SourcePath: src, Destination: dest, Recursive: true,
+		MoveFiles: true, CommandLabel: "Javinizer Sort", ActionVerb: "Processing files",
+		Resolved: &workflow.ResolvedSeamStrings{},
+	})
+	require.ErrorContains(t, err, "apply failed for 1 file(s)")
+	assert.Contains(t, buf.String(), "Apply failed for 1 file(s)")
+	assert.NotContains(t, buf.String(), "Complete!")
+	assert.FileExists(t, filepath.Join(src, "GOOD-705.mp4"))
+}
+
+func TestDefaultSummaryPrinter_ApplyFailure(t *testing.T) {
+	var buf bytes.Buffer
+	defaultSummaryPrinter(&buf, BatchCommandOptions{}, BatchCommandResult{
+		ScanResult: &workflow.ScanAndMatchResult{}, ApplyFailedCount: 2,
+	})
+	assert.Contains(t, buf.String(), "Apply failed for 2 file(s)")
+	assert.NotContains(t, buf.String(), "Complete!")
 }

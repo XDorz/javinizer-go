@@ -134,6 +134,9 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 	if cmd.Movie == nil {
 		return nil, fmt.Errorf("movie is nil")
 	}
+	if cmd.ArtifactCoordinator != nil {
+		defer cmd.ArtifactCoordinator.Done(cmd.ArtifactOwnerKey)
+	}
 
 	// Step 0: Begin revert log BEFORE any filesystem mutation.
 	opID, beginErr := o.beginRevertLog(ctx, cmd)

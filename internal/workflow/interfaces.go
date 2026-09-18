@@ -63,9 +63,11 @@ type ApplyCmd struct {
 	Dedup                  *sync.Map
 	// DedupOwnerKey/LogicalKey are populated by apply before fan-out so
 	// shared poster destinations have a deterministic first owner.
-	DedupOwnerKey   string
-	DedupLogicalKey string
-	OperationMode   operationmode.OperationMode // resolved at factory boundary
+	DedupOwnerKey       string
+	DedupLogicalKey     string
+	ArtifactCoordinator *SharedArtifactCoordinator
+	ArtifactOwnerKey    string
+	OperationMode       operationmode.OperationMode // resolved at factory boundary
 }
 
 // stepCompletion records which Apply steps completed successfully.

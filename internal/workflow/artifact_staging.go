@@ -2,6 +2,8 @@ package workflow
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -47,6 +49,10 @@ type artifactStage struct {
 	completedBatch     *downloader.ReplacementBatch
 	unresolvedBatch    *downloader.ReplacementBatch
 	sourceCleanupArmed bool
+	sharedClaims       []SharedArtifactClaim
+	sharedConsumers    []SharedArtifactClaim
+	sharedPublishBegan bool
+	sharedPoisoned     bool
 }
 
 var errArtifactDirtyAdmission = errors.New("artifact publication preparation failed")
@@ -344,14 +350,21 @@ func (s *artifactStage) finishDuplicateClaim(err error) {
 	s.duplicatePlan = nil
 }
 
-func (s *artifactStage) publish(ctx context.Context, o *applyOrchImpl, state *applyPipelineState, steps *stepCompletion) error {
+func (s *artifactStage) publish(ctx context.Context, o *applyOrchImpl, state *applyPipelineState, steps *stepCompletion) (returnErr error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			s.finishSharedArtifactClaims(s.sharedCompletionDisposition(true, errors.New("artifact publication panicked")))
+			panic(recovered)
+		}
+		s.finishSharedArtifactClaims(s.sharedCompletionDisposition(false, returnErr))
+	}()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if s.original.Movie == nil || strings.TrimSpace(s.original.Movie.ContentID) == "" {
 		return fmt.Errorf("artifact publication requires movie content id")
 	}
-	returnErr := s.fencer.WithApplyArtifactPublicationFence(ctx, s.original.Movie.ContentID, s.original.Movie.RenderGeneration, func(authoritative *models.Movie) error {
+	returnErr = s.fencer.WithApplyArtifactPublicationFence(ctx, s.original.Movie.ContentID, s.original.Movie.RenderGeneration, func(authoritative *models.Movie) error {
 		if authoritative == nil || authoritative.RenderGeneration != s.original.Movie.RenderGeneration {
 			return fmt.Errorf("artifact publication authoritative movie changed")
 		}
@@ -366,6 +379,7 @@ func (s *artifactStage) publish(ctx context.Context, o *applyOrchImpl, state *ap
 	// already-journaled filesystem transaction.
 	if returnErr != nil && s.completedBatch != nil {
 		if rollbackErr := s.completedBatch.Rollback(context.WithoutCancel(ctx)); rollbackErr != nil {
+			s.sharedPoisoned = true
 			returnErr = errors.Join(returnErr, fmt.Errorf("rollback staged publication after fence failure: %w", rollbackErr))
 		}
 	}
@@ -400,6 +414,7 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		if !committed {
 			if rollbackErr := batch.Rollback(context.WithoutCancel(ctx)); rollbackErr != nil {
 				s.unresolvedBatch = batch
+				s.sharedPoisoned = true
 				returnErr = errors.Join(returnErr, fmt.Errorf("rollback staged publication: %w", rollbackErr))
 			}
 			if createdFinalParent != "" {
@@ -559,6 +574,9 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		if err != nil {
 			return err
 		}
+		if s.isSharedConsumer(state.nfoPath) {
+			state.nfoPath = ""
+		}
 	}
 	mappedDownloads := make([]string, 0, len(state.downloadPaths))
 	for _, path := range state.downloadPaths {
@@ -566,11 +584,12 @@ func (s *artifactStage) publishUnderFence(ctx context.Context, o *applyOrchImpl,
 		if mapErr != nil {
 			return mapErr
 		}
-		if !batch.IsReplacement(mapped) {
+		if !batch.IsReplacement(mapped) && !s.isSharedConsumer(mapped) {
 			mappedDownloads = append(mappedDownloads, mapped)
 		}
 	}
 	state.downloadPaths = mappedDownloads
+	s.sharedConsumers = nil
 	if preservedMedia && steps != nil {
 		steps.PosterVerified = false
 	}
@@ -766,6 +785,7 @@ func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir
 		source, target string
 		skip           bool
 		replace        bool
+		sharedOwner    bool
 	}
 	plans := make([]installPath, 0, len(paths))
 	preserved := false
@@ -786,11 +806,32 @@ func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir
 		}
 
 		plan := installPath{source: source, target: target}
+		if coordinator := s.original.ArtifactCoordinator; coordinator != nil {
+			digest, digestErr := artifactDigest(s.fs, source)
+			if digestErr != nil {
+				return false, digestErr
+			}
+			claim, claimErr := coordinator.Claim(s.publishCtx, target, digest, s.original.ArtifactOwnerKey)
+			if claimErr != nil {
+				return false, claimErr
+			}
+			if claim.OwnsPublication() {
+				s.sharedClaims = append(s.sharedClaims, claim)
+				plan.sharedOwner = true
+			} else {
+				plan.skip = true
+				s.sharedConsumers = append(s.sharedConsumers, claim)
+			}
+		}
 		if filepath.Clean(source) == filepath.Clean(target) {
 			plan.skip = true
 			if !s.original.OverwriteExistingMedia && containsPath(preserve, source) {
 				preserved = true
 			}
+			plans = append(plans, plan)
+			continue
+		}
+		if plan.skip {
 			plans = append(plans, plan)
 			continue
 		}
@@ -833,6 +874,9 @@ func (s *artifactStage) installPaths(paths, preserve []string, stagedArtifactDir
 		if err := s.fs.MkdirAll(filepath.Dir(plan.target), 0o755); err != nil {
 			return false, fmt.Errorf("create artifact destination: %w", err)
 		}
+		if plan.sharedOwner {
+			s.sharedPublishBegan = true
+		}
 		if s.publishBatch != nil {
 			if _, err := s.publishBatch.BeforePublish(s.publishCtx, plan.target, plan.replace); err != nil {
 				return false, err
@@ -867,6 +911,51 @@ func (s *artifactStage) publicationPath(path, stagedArtifactDir, finalArtifactDi
 		return target, nil
 	}
 	return filepath.Join(finalArtifactDir, rel), nil
+}
+
+func artifactDigest(fs afero.Fs, path string) (string, error) {
+	file, err := fs.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open staged artifact for digest %s: %w", path, err)
+	}
+	hash := sha256.New()
+	_, copyErr := io.Copy(hash, file)
+	closeErr := file.Close()
+	if copyErr != nil {
+		return "", fmt.Errorf("digest staged artifact %s: %w", path, copyErr)
+	}
+	if closeErr != nil {
+		return "", fmt.Errorf("close staged artifact digest %s: %w", path, closeErr)
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func (s *artifactStage) sharedCompletionDisposition(panicked bool, err error) SharedArtifactCompletionDisposition {
+	if !panicked && err == nil {
+		return SharedArtifactPublished
+	}
+	if s.sharedPoisoned || (panicked && s.sharedPublishBegan) {
+		return SharedArtifactPoisoned
+	}
+	return SharedArtifactSafeToPromote
+}
+
+func (s *artifactStage) finishSharedArtifactClaims(disposition SharedArtifactCompletionDisposition) {
+	coordinator := s.original.ArtifactCoordinator
+	for _, claim := range s.sharedClaims {
+		coordinator.Complete(claim, disposition)
+	}
+	s.sharedClaims = nil
+}
+
+func (s *artifactStage) isSharedConsumer(path string) bool {
+	requested := filepath.Clean(path)
+	for _, claim := range s.sharedConsumers {
+		if claim.requested == requested {
+			return true
+		}
+	}
+	return false
 }
 
 func containsPath(paths []string, path string) bool {

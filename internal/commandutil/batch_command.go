@@ -218,13 +218,14 @@ type BatchCommandOptions struct {
 
 // BatchCommandResult holds the results from a batch command run.
 type BatchCommandResult struct {
-	ScanResult   *workflow.ScanAndMatchResult
-	FilePaths    []string
-	MatchedCount int
-	UniqueIDs    map[string]bool
-	Movies       map[string]*models.Movie
-	SuccessCount int
-	FailedCount  int
+	ScanResult       *workflow.ScanAndMatchResult
+	FilePaths        []string
+	MatchedCount     int
+	UniqueIDs        map[string]bool
+	Movies           map[string]*models.Movie
+	SuccessCount     int
+	FailedCount      int
+	ApplyFailedCount int
 	// SkippedDuplicates counts files whose apply succeeded as an authorized
 	// intra-batch duplicate skip (no bytes moved). Reported separately so the
 	// console summary tells the same truth as the persisted audit rows.
@@ -399,6 +400,10 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 	// when planning organize destinations.
 	scrapeCfg.FileMatchInfo = matchInfo
 	applyCfg := applyOpts.ToApplyPhaseConfig()
+	applyFailureCount := &atomic.Int64{}
+	applyCfg.OnPhaseComplete = func(_, failed int) {
+		applyFailureCount.Store(int64(failed))
+	}
 	// Audit hook (#244): persist per-file organize/update events (incl.
 	// authorized duplicate-skip warnings) to the eventlog and print skip
 	// warnings to the console, keeping CLI output in sync with the persisted
@@ -460,6 +465,10 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 		failedCount = 0
 	}
 
+	terminalApplyFailures := int(applyFailureCount.Load())
+	if opts.DryRun {
+		terminalApplyFailures = 0
+	}
 	batchResult := BatchCommandResult{
 		ScanResult:        scanResult,
 		FilePaths:         filePaths,
@@ -468,6 +477,7 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 		Movies:            movies,
 		SuccessCount:      successCount,
 		FailedCount:       failedCount,
+		ApplyFailedCount:  terminalApplyFailures,
 		SkippedDuplicates: int(skipCount.Load()),
 	}
 
@@ -479,6 +489,9 @@ func RunBatchCommand(ctx context.Context, w io.Writer, opts BatchCommandOptions)
 		presenter.OnSummary(w, opts, batchResult)
 	}
 
+	if batchResult.ApplyFailedCount > 0 {
+		return fmt.Errorf("apply failed for %d file(s)", batchResult.ApplyFailedCount)
+	}
 	return nil
 }
 
@@ -752,7 +765,9 @@ func defaultSummaryPrinter(w io.Writer, opts BatchCommandOptions, result BatchCo
 		fmt.Fprintf(w, "Mode: %s\n", opts.ModeLine)
 	}
 
-	if opts.DryRun {
+	if result.ApplyFailedCount > 0 {
+		fmt.Fprintf(w, "\n❌ Apply failed for %d file(s)\n", result.ApplyFailedCount)
+	} else if opts.DryRun {
 		fmt.Fprintln(w, "\n💡 Run without --dry-run to apply changes")
 	} else {
 		completion := opts.CompletionMessage

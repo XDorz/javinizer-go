@@ -61,6 +61,16 @@ type applyItem struct {
 // workers later execute, so PreApply-hook mutations reach both, and every
 // hook still runs exactly once per file. baseline is the phase-entry movie
 // clone (codex r51), frozen before the hook could mutate the live pointer.
+func artifactMovieKey(item applyItem) string {
+	if item.movie != nil && item.movie.ContentID != "" {
+		return item.movie.ContentID
+	}
+	if item.fileResult != nil && item.fileResult.FileMatchInfo.MovieID != "" {
+		return item.fileResult.FileMatchInfo.MovieID
+	}
+	return item.filePath
+}
+
 type preparedApplyFile struct {
 	cmd      workflow.ApplyCmd
 	afc      *ApplyFileContext
@@ -533,8 +543,22 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 		}
 		items = ordered
 	}
+	artifactOwners := make(map[string][]string)
+	for _, item := range items {
+		artifactOwners[artifactMovieKey(item)] = append(artifactOwners[artifactMovieKey(item)], item.filePath)
+	}
+	artifactCoordinators := make(map[string]*workflow.SharedArtifactCoordinator, len(artifactOwners))
+	for movieKey, owners := range artifactOwners {
+		artifactCoordinators[movieKey] = workflow.NewSharedArtifactCoordinator(owners)
+	}
+	for _, item := range items {
+		prepared[item.filePath].cmd.ArtifactCoordinator = artifactCoordinators[artifactMovieKey(item)]
+		prepared[item.filePath].cmd.ArtifactOwnerKey = item.filePath
+	}
 	outcomes := fanout.BoundedFanOut(ctx, inputs.Concurrency.MaxWorkers, items,
 		func(egCtx context.Context, item applyItem) applyFileOutcome {
+			coordinator := prepared[item.filePath].cmd.ArtifactCoordinator
+			defer coordinator.Done(item.filePath)
 			outcome := applyFile(egCtx, wf, item.filePath, item.fileResult, item.movie, prepared[item.filePath], inputs, cfg)
 			// Report per-file progress so the frontend bar advances 0→100 across
 			// files instead of jumping straight to 100 on OnPhaseComplete. A file
