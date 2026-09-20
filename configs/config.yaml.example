@@ -222,7 +222,8 @@ scrapers:
         scrape_bonus_screens: false # Append bonus image files (e.g., "特典ファイル ... (48 Pics)") to screenshot URLs
     dlgetchu:
         enabled: false
-        base_url: "http://dl.getchu.com"
+        base_url: "https://dl.getchu.com"
+        id_prefix: "getchu-" # Leave empty for numeric IDs; applies to freshly scraped metadata
     caribbeancom:
         enabled: false
         language: ja

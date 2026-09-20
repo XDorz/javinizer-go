@@ -309,6 +309,11 @@ export function createScraperStore(deps: ScraperStoreDeps): ScraperStore {
 			optionKey,
 		);
 
+		// An explicitly empty DLGetchu prefix disables formatting; it is not a missing default.
+		if (scraperName === 'dlgetchu' && optionKey === 'id_prefix' && currentValue === '') {
+			return '';
+		}
+
 		if (currentValue === undefined || currentValue === null || currentValue === '') {
 			return option?.default ?? (currentValue === null ? undefined : currentValue);
 		}

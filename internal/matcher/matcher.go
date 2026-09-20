@@ -10,9 +10,10 @@ import (
 
 // Matcher identifies JAV IDs from filenames
 type Matcher struct {
-	config         *Config
-	regexPattern   *regexp.Regexp
-	builtinPattern *regexp.Regexp
+	config                *Config
+	regexPattern          *regexp.Regexp
+	builtinPattern        *regexp.Regexp
+	dlgetchuPrefixPattern *regexp.Regexp
 }
 
 // MatchResult represents a matched file with extracted ID
@@ -56,6 +57,13 @@ func NewMatcher(cfg *Config) (*Matcher, error) {
 	//   5. Hyphen format: letters + hyphen + digits (standard JAV)
 	builtinPattern := `(?i)((?:h_\d+[a-z]+\d+)|(?:\b\d{6}[-_]\d{2,3}-(?:1PON|10MU|CARIB)\b)|(?:\b[A-Za-z]{1,2}\d{3,5}\b)|(?:\b[A-Za-z]{3,6}\d{3,4}\b)|(?:(?:[A-Za-z]+|T28)-\d+(?:[ZE])?))`
 	m.builtinPattern = regexp.MustCompile(builtinPattern)
+	// Known Getchu prefixes identify a complete numeric catalog ID. Handle these
+	// before general JAV patterns, which can consume only part of a custom prefix.
+	prefixes := "getchu[-_]|item"
+	if cfg.DLGetchuIDPrefix != "" {
+		prefixes = regexp.QuoteMeta(cfg.DLGetchuIDPrefix) + "|" + prefixes
+	}
+	m.dlgetchuPrefixPattern = regexp.MustCompile(`(?i)(` + prefixes + `)`)
 
 	// Compile custom regex if enabled
 	if cfg.RegexEnabled && cfg.RegexPattern != "" {
@@ -88,6 +96,12 @@ func (m *Matcher) MatchFile(file models.FileMatchInfo) *MatchResult {
 	basename := filepath.Base(file.Name)
 	nameWithoutExt := strings.TrimSuffix(basename, file.Extension)
 
+	id, filteredName := m.matchDLGetchu(nameWithoutExt)
+	if id != "" {
+		return m.matchID(file, nameWithoutExt, id, "builtin")
+	}
+	nameWithoutExt = filteredName
+
 	// Try custom regex first if enabled
 	if m.config.RegexEnabled && m.regexPattern != nil {
 		if result := m.matchWithRegex(file, nameWithoutExt, m.regexPattern, "regex"); result != nil {
@@ -115,6 +129,10 @@ func (m *Matcher) matchWithRegex(file models.FileMatchInfo, filename string, pat
 		return nil
 	}
 
+	return m.matchID(file, filename, id, matchType)
+}
+
+func (m *Matcher) matchID(file models.FileMatchInfo, filename, id, matchType string) *MatchResult {
 	result := &MatchResult{
 		File:      file,
 		MatchedBy: matchType,
@@ -162,8 +180,61 @@ func (m *Matcher) matchWithRegex(file models.FileMatchInfo, filename string, pat
 	return result
 }
 
+// matchDLGetchu commits to the longest configured prefix before examining the
+// numeric suffix. Otherwise a malformed custom ID such as getchu-123-456abc
+// can backtrack to the shorter, apparently valid canonical ID getchu-123.
+// Invalid tokens are hidden only from the general matchers; independent IDs
+// elsewhere in the filename retain their existing matching behavior.
+func (m *Matcher) matchDLGetchu(filename string) (string, string) {
+	var filtered []byte
+	for _, match := range m.dlgetchuPrefixPattern.FindAllStringSubmatchIndex(filename, -1) {
+		start, end := match[2], match[3]
+		if start > 0 && isASCIIAlphaNumeric(filename[start-1]) {
+			continue
+		}
+		digitStart := end
+		for end < len(filename) && filename[end] >= '0' && filename[end] <= '9' {
+			end++
+		}
+		if end > digitStart && (end == len(filename) || !isASCIIAlphaNumeric(filename[end])) {
+			return filename[start:end], filename
+		}
+		// "item" also begins ordinary JAV prefixes such as ITEM-123 and
+		// ITEMS-123. Without a digit it is not a canonical Getchu token.
+		// An explicitly configured custom prefix remains authoritative, even
+		// when malformed, to prevent fallback to a shorter canonical alias.
+		if end == digitStart && !strings.EqualFold(filename[start:digitStart], m.config.DLGetchuIDPrefix) {
+			continue
+		}
+		// Mask the malformed prefix and attached alphanumeric tail so neither a
+		// generic pattern nor the user's default regex can turn it into another ID.
+		for end < len(filename) && isASCIIAlphaNumeric(filename[end]) {
+			end++
+		}
+		if filtered == nil {
+			filtered = []byte(filename)
+		}
+		for i := start; i < end; i++ {
+			filtered[i] = ' '
+		}
+	}
+	if filtered != nil {
+		return "", string(filtered)
+	}
+	return "", filename
+}
+
+func isASCIIAlphaNumeric(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+}
+
 // MatchString is a helper to extract ID from a string directly
 func (m *Matcher) MatchString(s string) string {
+	id, filteredName := m.matchDLGetchu(s)
+	if id != "" {
+		return strings.ToUpper(id)
+	}
+	s = filteredName
 	// Try custom regex first
 	if m.config.RegexEnabled && m.regexPattern != nil {
 		matches := m.regexPattern.FindStringSubmatch(s)

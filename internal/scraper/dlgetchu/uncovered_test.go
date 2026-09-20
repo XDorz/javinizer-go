@@ -34,8 +34,8 @@ func TestScraper_CanHandleURL_Uncovered(t *testing.T) {
 		expected bool
 	}{
 		{"dl.getchu.com", "http://dl.getchu.com/i/item123456", true},
-		{"getchu.com", "http://getchu.com/i/item123456", true},
-		{"subdomain", "http://www.dl.getchu.com/i/item123456", true},
+		{"getchu.com", "http://getchu.com/i/item123456", false},
+		{"subdomain", "http://www.dl.getchu.com/i/item123456", false},
 		{"unrelated", "https://example.com/item123456", false},
 		{"invalid URL", "://not-a-url", false},
 		{"empty URL", "", false},
@@ -59,7 +59,7 @@ func TestScraper_ExtractIDFromURL_Uncovered(t *testing.T) {
 	}{
 		{"item ID in query", "http://dl.getchu.com/index.php?action=article&id=1234567", "1234567", false},
 		{"item in path", "http://dl.getchu.com/i/item1234567", "1234567", false},
-		{"item with 作品ID prefix", "http://dl.getchu.com/page?作品ID：1234567", "1234567", false},
+		{"item with 作品ID prefix", "http://dl.getchu.com/page?作品ID：1234567", "", true},
 		{"no extractable ID", "http://example.com/nothing", "", true},
 	}
 
@@ -81,9 +81,9 @@ func TestExtractNumericID_Uncovered(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"id=1234567", "1234567"},
-		{"作品ID：1234567", "1234567"},
-		{"/item1234567", "1234567"},
+		{"id=1234567", ""},
+		{"作品ID：1234567", ""},
+		{"/item1234567", ""},
 		{"no match", ""},
 		{"", ""},
 	}

@@ -34,9 +34,9 @@ func TestCanHandleURLV4(t *testing.T) {
 		settings: models.ScraperSettings{Enabled: true},
 	}
 
-	// CanHandleURL checks for dl.getchu.com or getchu.com
-	assert.True(t, s.CanHandleURL("https://dl.getchu.com/work/=/product_id/RJ123456.html"))
-	assert.True(t, s.CanHandleURL("https://www.dl.getchu.com/work/=/product_id/RJ123456.html"))
+	// A DLsite-style route on a Getchu host is still not a Getchu product.
+	assert.False(t, s.CanHandleURL("https://dl.getchu.com/work/=/product_id/RJ123456.html"))
+	assert.False(t, s.CanHandleURL("https://www.dl.getchu.com/work/=/product_id/RJ123456.html"))
 	assert.False(t, s.CanHandleURL("https://example.com/work/RJ123456"))
 	assert.False(t, s.CanHandleURL(""))
 }
@@ -55,7 +55,7 @@ func TestParseDetailPageV4(t *testing.T) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(detailHTML))
 	require.NoError(t, err)
 
-	result := parseDetailPage(doc, detailHTML, "https://dl.getchu.com/work/=/product_id/RJ123456", "RJ123456")
+	result := parseDetailPage(doc, detailHTML, "https://dl.getchu.com/work/=/product_id/RJ123456")
 	require.NotNil(t, result)
-	assert.Equal(t, "RJ123456", result.ID)
+	assert.Empty(t, result.ID)
 }

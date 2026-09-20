@@ -23,7 +23,7 @@ func (rt *dlgRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 		if strings.Contains(req.URL.String(), path) || strings.Contains(path, req.URL.Path) {
 			return &http.Response{
 				StatusCode: http.StatusOK,
-				Header:     http.Header{"Content-Type": []string{"text/html; charset=Shift_JIS"}},
+				Header:     http.Header{"Content-Type": []string{"text/html; charset=utf-8"}},
 				Body:       io.NopCloser(strings.NewReader(body)),
 				Request:    req,
 			}, nil
@@ -42,6 +42,7 @@ func TestScrapeURLV2_Success(t *testing.T) {
 	detailHTML := `
 <!DOCTYPE html>
 <html>
+<head><title>Sample product</title></head>
 <body>
 <table>
 <tr><td>作品ID：12345</td></tr>

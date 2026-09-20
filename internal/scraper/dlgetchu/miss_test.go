@@ -111,9 +111,9 @@ func TestGetURL_MissTest_SearchFallback(t *testing.T) {
 
 	settings := testSettings(server.URL)
 	s := newScraper(settings, nil, models.FlareSolverrConfig{})
-	url, err := s.GetURL(context.Background(), "ABC-123")
-	require.NoError(t, err)
-	assert.Contains(t, url, "/i/item54321")
+	url, err := s.GetURL(context.Background(), "getchu-12345")
+	require.Error(t, err)
+	assert.Empty(t, url)
 }
 
 // --- getURLCtx: all searches fail ---
@@ -132,7 +132,7 @@ func TestGetURL_MissTest_AllSearchesFail(t *testing.T) {
 
 	settings := testSettings(server.URL)
 	s := newScraper(settings, nil, models.FlareSolverrConfig{})
-	_, err := s.GetURL(context.Background(), "NOTFOUND-999")
+	_, err := s.GetURL(context.Background(), "getchu-999")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found on DLgetchu")
 }
@@ -214,10 +214,10 @@ func TestSearch_MissTest_SuccessWithFullDetail(t *testing.T) {
 
 	settings := testSettings(server.URL)
 	s := newScraper(settings, nil, models.FlareSolverrConfig{})
-	result, err := s.Search(context.Background(), "ABC-123")
+	result, err := s.Search(context.Background(), "getchu-12345")
 	require.NoError(t, err)
 	assert.Equal(t, "dlgetchu", result.Source)
-	assert.Equal(t, "12345", result.ID)
+	assert.Equal(t, "getchu-12345", result.ID)
 	assert.Equal(t, "DLgetchu Test Title", result.Title)
 	assert.Equal(t, 90, result.Runtime)
 	assert.Equal(t, "Test Circle", result.Maker)

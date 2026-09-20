@@ -1,4 +1,6 @@
 {
+  "settings_dlgetchu_id_prefix_label": "Output ID prefix",
+  "settings_dlgetchu_id_prefix_desc": "Default: getchu-. Leave empty for numeric IDs. Use up to 32 ASCII letters, digits, _ or -, including a letter. Do not use a complete Getchu ID as a prefix (e.g. getchu-123 or item12). Applies to freshly scraped metadata; existing cached results are unchanged.",
   "$schema": "https://inlang.com/schema/inlang-message-format",
   "actresses_actress_created": "Actress created",
   "actresses_actress_deleted": "Actress deleted",

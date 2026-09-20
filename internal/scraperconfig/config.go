@@ -403,17 +403,19 @@ func ResolveScraperProxyMode(global ProxyConfig, scraperOverride *ProxyConfig) S
 
 // ScraperSettings holds unified scraper configuration fields used by the Scraper interface.
 type ScraperSettings struct {
-	Enabled         bool         `yaml:"enabled" json:"enabled"`
-	Language        string       `yaml:"language" json:"language"`
-	Timeout         int          `yaml:"timeout" json:"timeout"`
-	RateLimit       int          `yaml:"rate_limit" json:"rate_limit"`
-	RetryCount      int          `yaml:"retry_count" json:"retry_count"`
-	UserAgent       string       `yaml:"user_agent" json:"user_agent"`
-	Proxy           *ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`
-	DownloadProxy   *ProxyConfig `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"`
-	BaseURL         string       `yaml:"base_url,omitempty" json:"base_url,omitempty"`
-	UseFlareSolverr bool         `yaml:"use_flaresolverr" json:"use_flaresolverr"`
-	UseBrowser      bool         `yaml:"use_browser" json:"use_browser"`
+	Enabled       bool         `yaml:"enabled" json:"enabled"`
+	Language      string       `yaml:"language" json:"language"`
+	Timeout       int          `yaml:"timeout" json:"timeout"`
+	RateLimit     int          `yaml:"rate_limit" json:"rate_limit"`
+	RetryCount    int          `yaml:"retry_count" json:"retry_count"`
+	UserAgent     string       `yaml:"user_agent" json:"user_agent"`
+	Proxy         *ProxyConfig `yaml:"proxy,omitempty" json:"proxy,omitempty"`
+	DownloadProxy *ProxyConfig `yaml:"download_proxy,omitempty" json:"download_proxy,omitempty"`
+	BaseURL       string       `yaml:"base_url,omitempty" json:"base_url,omitempty"`
+	// IDPrefix is DLGetchu's output prefix: nil inherits, an empty string disables it.
+	IDPrefix        *string `yaml:"id_prefix,omitempty" json:"id_prefix,omitempty"`
+	UseFlareSolverr bool    `yaml:"use_flaresolverr" json:"use_flaresolverr"`
+	UseBrowser      bool    `yaml:"use_browser" json:"use_browser"`
 	// *bool fields (ScrapeActress, RespectRetryAfter) represent tri-state semantics:
 	// nil = inherit from global default (resolved via Should* helpers),
 	// non-nil = explicit override. Plain bool fields (UseFlareSolverr, UseBrowser,
@@ -453,6 +455,9 @@ func (s *ScraperSettings) MarshalYAML() (interface{}, error) {
 	}
 	if s.BaseURL != "" {
 		result["base_url"] = s.BaseURL
+	}
+	if s.IDPrefix != nil {
+		result["id_prefix"] = *s.IDPrefix
 	}
 	result["use_flaresolverr"] = s.UseFlareSolverr
 	result["use_browser"] = s.UseBrowser
@@ -495,6 +500,10 @@ func (s *ScraperSettings) MarshalJSON() ([]byte, error) {
 // Pointer, map, and slice fields are cloned so mutations to the copy do not affect the original.
 func (s *ScraperSettings) Clone() ScraperSettings {
 	cp := *s
+	if cp.IDPrefix != nil {
+		val := *cp.IDPrefix
+		cp.IDPrefix = &val
+	}
 	if cp.Proxy != nil {
 		p := *cp.Proxy
 		p.Profiles = maps.Clone(p.Profiles)
@@ -536,6 +545,10 @@ func (s *ScraperSettings) Clone() ScraperSettings {
 // semantics (UseFlareSolverr, UseBrowser, ScrapeBonusScreens) are
 // also excluded because their zero values are meaningful.
 func (s *ScraperSettings) MergeDefaultsFrom(defaults ScraperSettings) {
+	if defaults.IDPrefix != nil && s.IDPrefix == nil {
+		val := *defaults.IDPrefix
+		s.IDPrefix = &val
+	}
 	if defaults.Language != "" && s.Language == "" {
 		s.Language = defaults.Language
 	}

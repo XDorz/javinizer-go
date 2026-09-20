@@ -189,6 +189,9 @@
 
 									{#each getRenderableScraperOptions(scraper).filter(opt => opt.key !== 'use_browser' || scraper.name === 'dmm') as option}
 										{@const optionDisabled = isOptionDisabled(scraper.name, option.key)}
+										{@const isGetchuPrefix = scraper.name === 'dlgetchu' && option.key === 'id_prefix'}
+										{@const optionLabel = isGetchuPrefix ? m.settings_dlgetchu_id_prefix_label() : option.label}
+										{@const optionDescription = isGetchuPrefix ? m.settings_dlgetchu_id_prefix_desc() : option.description}
 										<div class="space-y-1">
 											{#if option.type === 'boolean'}
 												<label class="flex items-center gap-2">
@@ -199,10 +202,10 @@
 														onchange={(e) => setOptionValue(scraper.name, option.key, e.currentTarget.checked)}
 														class="rounded"
 													/>
-													<span class="text-sm {optionDisabled ? 'text-muted-foreground' : ''}">{option.label}</span>
+													<span class="text-sm {optionDisabled ? 'text-muted-foreground' : ''}">{optionLabel}</span>
 												</label>
 												<p class="text-xs text-muted-foreground ml-6">
-													{option.description}
+													{optionDescription}
 													{#if optionDisabled && option.key === 'use_browser'}
 														<span class="text-amber-600 block mt-1">{m.settings_scraper_use_browser_warn()}</span>
 													{:else if optionDisabled && option.key === 'scrape_actress'}
@@ -211,7 +214,7 @@
 												</p>
 											{:else if option.type === 'select'}
 												<div class={optionDisabled ? 'opacity-60' : ''}>
-													<label class="block text-sm font-medium mb-1 {optionDisabled ? 'text-muted-foreground' : ''}" for="option-{scraper.name}-{option.key}">{option.label}</label>
+													<label class="block text-sm font-medium mb-1 {optionDisabled ? 'text-muted-foreground' : ''}" for="option-{scraper.name}-{option.key}">{optionLabel}</label>
 													<select
 														id="option-{scraper.name}-{option.key}"
 														value={getOptionValue(scraper.name, option.key) ?? ''}
@@ -224,12 +227,12 @@
 														{/each}
 													</select>
 													<p class="text-xs text-muted-foreground mt-1">
-														{option.description}
+														{optionDescription}
 													</p>
 												</div>
 											{:else if option.type === 'string' || option.type === 'password'}
 												<div>
-													<label class="block text-sm font-medium mb-1" for="option-{scraper.name}-{option.key}">{option.label}</label>
+													<label class="block text-sm font-medium mb-1" for="option-{scraper.name}-{option.key}">{optionLabel}</label>
 													<input
 														id="option-{scraper.name}-{option.key}"
 														type={option.type === 'password' ? 'password' : 'text'}
@@ -239,12 +242,12 @@
 														class="w-full max-w-md px-3 py-2 border rounded-md focus:ring-2 focus:ring-primary focus:border-primary transition-all bg-background text-sm"
 													/>
 													<p class="text-xs text-muted-foreground mt-1">
-														{option.description}
+														{optionDescription}
 													</p>
 												</div>
 											{:else if option.type === 'number'}
 												<div>
-													<label class="block text-sm font-medium mb-1" for="option-{scraper.name}-{option.key}">{option.label}</label>
+													<label class="block text-sm font-medium mb-1" for="option-{scraper.name}-{option.key}">{optionLabel}</label>
 													<div class="flex items-center gap-2">
 														<input
 															id="option-{scraper.name}-{option.key}"
@@ -261,7 +264,7 @@
 														{/if}
 													</div>
 													<p class="text-xs text-muted-foreground mt-1">
-														{option.description}
+														{optionDescription}
 													</p>
 												</div>
 											{/if}

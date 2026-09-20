@@ -1,4 +1,6 @@
 {
+  "settings_dlgetchu_id_prefix_label": "出力 ID の接頭辞",
+  "settings_dlgetchu_id_prefix_desc": "既定値: getchu-。空欄で数字のみ。英数字、_、- を32文字以内で指定し、英字を含めてください。完全な作品ID（getchu-123、item12 など）は指定できません。新しく取得するメタデータに適用され、既存のキャッシュは変更しません。",
   "$schema": "https://inlang.com/schema/inlang-message-format",
   "actresses_actress_created": "女優を作成しました",
   "actresses_actress_deleted": "女優を削除しました",

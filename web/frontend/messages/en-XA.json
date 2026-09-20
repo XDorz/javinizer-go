@@ -1,4 +1,6 @@
 {
+  "settings_dlgetchu_id_prefix_label": "[ Öütpüt ÏD prëfíx ]",
+  "settings_dlgetchu_id_prefix_desc": "[ Dëfåült: getchu-. Lëåvë ëmpty för ñümëríç ÏDs. ]",
   "$schema": "https://inlang.com/schema/inlang-message-format",
   "apply_plan_destination": "[ Dëstíñåtíöñ: {destination} ]",
   "apply_plan_err_array_strategy": "[ Üñsüppörtëd årråy mërgë stråtëgy. ]",

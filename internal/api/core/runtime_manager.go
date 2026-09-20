@@ -370,8 +370,9 @@ func (s *RuntimeSnapshot) ScanOnlyWorkflow() (workflow.WorkflowInterface, error)
 func (s *RuntimeSnapshot) Matcher() matcher.MatcherInterface {
 	matchCfg := s.apiCfg.MatcherConfig()
 	mat, err := matcher.NewMatcher(&matcher.Config{
-		RegexEnabled: matchCfg.RegexEnabled,
-		RegexPattern: matchCfg.RegexPattern,
+		RegexEnabled:     matchCfg.RegexEnabled,
+		RegexPattern:     matchCfg.RegexPattern,
+		DLGetchuIDPrefix: matchCfg.DLGetchuIDPrefix,
 	})
 	if err != nil {
 		logging.Warnf("Failed to create matcher from snapshot APIConfig: %v", err)
@@ -602,8 +603,9 @@ func (r *APIRuntime) NewMatcher() matcher.MatcherInterface {
 	apiCfg := r.GetAPIConfig()
 	matchCfg := apiCfg.MatcherConfig()
 	mat, err := matcher.NewMatcher(&matcher.Config{
-		RegexEnabled: matchCfg.RegexEnabled,
-		RegexPattern: matchCfg.RegexPattern,
+		RegexEnabled:     matchCfg.RegexEnabled,
+		RegexPattern:     matchCfg.RegexPattern,
+		DLGetchuIDPrefix: matchCfg.DLGetchuIDPrefix,
 	})
 	if err != nil {
 		logging.Warnf("Failed to create matcher from APIConfig: %v", err)

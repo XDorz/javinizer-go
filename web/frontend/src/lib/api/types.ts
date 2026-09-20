@@ -972,6 +972,7 @@ export interface ScraperSettings {
 	proxy?: ProxyConfig;
 	download_proxy?: ProxyConfig;
 	base_url?: string;
+	id_prefix?: string;
 	use_flaresolverr: boolean;
 	use_browser: boolean;
 	scrape_actress?: boolean | null;

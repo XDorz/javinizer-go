@@ -1,4 +1,6 @@
 {
+  "settings_dlgetchu_id_prefix_label": "輸出 ID 前綴",
+  "settings_dlgetchu_id_prefix_desc": "預設 getchu-；留空使用純數字。限 32 個英文字母、數字、底線或連字號，且至少包含一個字母。不能使用完整編號（如 getchu-123 或 item12）作為前綴。重新取得中繼資料後生效，不修改既有快取。",
   "$schema": "https://inlang.com/schema/inlang-message-format",
   "actresses_actress_created": "已建立女優",
   "actresses_actress_deleted": "已刪除女優",

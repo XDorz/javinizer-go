@@ -125,6 +125,12 @@ scrapers:
 
 **user_agent**: HTTP User-Agent header sent to scraper websites. Empty by default — Javinizer then sends a Chrome-like User-Agent, and the r18dev scraper automatically uses the `Javinizer (+https://github.com/javinizer/javinizer-go)` UA. Set this only to override the default.
 
+**DLGetchu IDs**: In WebUI **Settings → Scrapers → DLGetchu**, set **Output ID prefix** (`scrapers.dlgetchu.id_prefix`). The default is `getchu-`; explicitly leave it empty for numeric IDs. Custom prefixes support up to 32 ASCII letters, digits, underscores and hyphens, with at least one letter. Prefixes that are themselves complete Getchu IDs (such as `getchu-123` or `item12`) are rejected because they would make standard inputs ambiguous. This formats the verified scraper result ID used by existing naming templates and NFO generation; the source content ID remains numeric. Existing cached metadata and organized files are not rewritten; fetch fresh metadata to apply a changed prefix.
+
+The matcher recognizes `getchu-1234567`, `getchu_1234567`, `item1234567` case-insensitively, plus the currently configured custom output prefix. DLGetchu only accepts exact product identity matches; unrelated search results and redirects are rejected without changing the existing source priority or aggregation policy.
+
+DLGetchu's direct item lookup and labelled-field extraction were reviewed against [MetaTube's Getchu provider](https://github.com/metatube-community/metatube-sdk-go/blob/main/provider/getchu/getchu.go). The implementation uses Javinizer's existing HTTP and parsing infrastructure and does not require a MetaTube service or SDK.
+
 **priority**: Order to query scrapers. First scraper is tried first. If it fails, the next one is attempted. The default list contains all 14 supported scrapers (`r18dev, libredmm, dmm, javlibrary, javdb, javbus, jav321, mgstage, tokyohot, aventertainment, caribbeancom, dlgetchu, fc2, javstash`).
 
 **proxy**: Global HTTP/SOCKS5 proxy used by all scrapers by default. Define reusable connection profiles under `profiles`, pick the global default with `default_profile`, and enable with `enabled: true`. A direct top-level `url`/`username`/`password` is **not** supported — the config loader rejects those legacy fields. Each scraper can override via `scrapers.<name>.proxy` with `profile: <name>` to reference a profile from `scrapers.proxy.profiles`. FlareSolverr is configured separately at `scrapers.flaresolverr` (global) or `scrapers.<name>.flaresolverr` (per-scraper) — it is **not** nested under `proxy`.

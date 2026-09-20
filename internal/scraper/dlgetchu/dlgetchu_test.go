@@ -39,7 +39,7 @@ func TestSearch(t *testing.T) {
 <table>
 <tr><td>作品内容</td><td>Long <b>description</b> for the DLgetchu parser.</td></tr>
 </table>
-<div>作品ID: 12345</div>
+<title>Sample product</title><div>作品ID: 12345</div>
 <div>発売日 2026/02/13</div>
 <div>収録時間 ９０分</div>
 <a href="dojin_circle_detail.php?id=44">Test Circle</a>
@@ -56,7 +56,7 @@ func TestSearch(t *testing.T) {
 	defer server.Close()
 
 	s := newScraper(testSettings(server.URL), nil, models.FlareSolverrConfig{})
-	result, err := s.Search(context.Background(), "ABC-123")
+	result, err := s.Search(context.Background(), "getchu-12345")
 	if err != nil {
 		t.Fatalf("Search returned error: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestSearch(t *testing.T) {
 	if result.SourceURL != server.URL+"/i/item12345" {
 		t.Fatalf("SourceURL = %q", result.SourceURL)
 	}
-	if result.ID != "12345" || result.ContentID != "12345" {
+	if result.ID != "getchu-12345" || result.ContentID != "12345" {
 		t.Fatalf("unexpected IDs: %q %q", result.ID, result.ContentID)
 	}
 	if result.Title != "DLgetchu Sample Title" {
@@ -109,7 +109,7 @@ func TestParseDetailPage_Fallbacks(t *testing.T) {
 		t.Fatalf("parse html: %v", err)
 	}
 
-	result := parseDetailPage(doc, `<html><body><div>id=98765</div></body></html>`, "https://dl.getchu.com/i/item98765", "RJ-1")
+	result := parseDetailPage(doc, `<html><body><div>id=98765</div></body></html>`, "https://dl.getchu.com/i/item98765")
 	if result.ID != "98765" {
 		t.Fatalf("ID = %q, want 98765", result.ID)
 	}
@@ -122,13 +122,13 @@ func TestParseDetailPage_Fallbacks(t *testing.T) {
 }
 
 func TestHelpers(t *testing.T) {
-	if got := findFirstDetailLink(`<a href="/i/item12345">x</a>`, "https://dl.getchu.com"); got != "https://dl.getchu.com/i/item12345" {
+	if got := (&scraper{baseURL: "https://dl.getchu.com"}).findDetailLink(`<a href="/i/item12345">x</a>`, "12345"); got != "https://dl.getchu.com/i/item12345" {
 		t.Fatalf("findFirstDetailLink = %q", got)
 	}
 	if got := normalizeFullWidthDigits("１２３ ４５"); got != "123 45" {
 		t.Fatalf("normalizeFullWidthDigits = %q", got)
 	}
-	if got := extractNumericID("作品ID: 54321"); got != "54321" {
+	if got := extractNumericID("getchu-54321"); got != "54321" {
 		t.Fatalf("extractNumericID = %q", got)
 	}
 	if got := scraperutil.ResolveURL("https://dl.getchu.com/i/item12345", "/x/y.jpg"); got != "https://dl.getchu.com/x/y.jpg" {
@@ -473,7 +473,7 @@ func TestScraper_GetURL_Search(t *testing.T) {
 		if strings.Contains(path, "/i/item") {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_, _ = fmt.Fprint(w, `<html><body>
-<div>作品ID: 12345</div>
+<title>Sample product</title><div>作品ID: 12345</div>
 <div>発売日 2026/02/13</div>
 <a href="dojin_circle_detail.php?id=44">Test Circle</a>
 <img src="/data/item_img/demo/12345top.jpg">
@@ -491,7 +491,7 @@ func TestScraper_GetURL_Search(t *testing.T) {
 	s := newScraper(settings, nil, models.FlareSolverrConfig{})
 
 	// Test search fallback
-	url, err := s.GetURL(context.Background(), "ABC-123")
+	url, err := s.GetURL(context.Background(), "12345")
 	assert.NoError(t, err, "GetURL should succeed with search fallback")
 	assert.Contains(t, url, "/i/item12345")
 }
@@ -532,7 +532,7 @@ func TestFindFirstDetailLink(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := findFirstDetailLink(tt.html, tt.baseURL)
+			result := (&scraper{baseURL: tt.baseURL}).findDetailLink(tt.html, "12345")
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -547,17 +547,17 @@ func TestExtractNumericID(t *testing.T) {
 	}{
 		{
 			name:     "With label",
-			input:    "作品ID: 12345",
+			input:    "getchu-12345",
 			expected: "12345",
 		},
 		{
 			name:     "With fullwidth colon",
-			input:    "作品ID：67890",
+			input:    "GETCHU_67890",
 			expected: "67890",
 		},
 		{
 			name:     "URL pattern",
-			input:    "/item99999",
+			input:    "item99999",
 			expected: "99999",
 		},
 		{
@@ -877,7 +877,7 @@ func TestCanHandleURL(t *testing.T) {
 		expected bool
 	}{
 		{"dl.getchu.com", "https://dl.getchu.com/i/item12345", true},
-		{"getchu.com", "https://www.getchu.com/i/item12345", true},
+		{"getchu.com", "https://www.getchu.com/i/item12345", false},
 		{"with path", "http://dl.getchu.com/i/item12345", true},
 		{"other site", "https://www.example.com/item/12345", false},
 		{"malformed URL", "not-a-url", false},
@@ -902,9 +902,9 @@ func TestExtractIDFromURL(t *testing.T) {
 		wantErr  bool
 	}{
 		{"standard path", "https://dl.getchu.com/i/item12345", "12345", false},
-		{"getchu.com path", "https://www.getchu.com/i/item67890", "67890", false},
+		{"getchu.com path", "https://www.getchu.com/i/item67890", "", true},
 		{"with trailing slash", "https://dl.getchu.com/i/item12345/", "12345", false},
-		{"item ID in HTML context", "https://dl.getchu.com/i/item 作品ID: 54321", "54321", false},
+		{"item ID in HTML context", "https://dl.getchu.com/i/item 作品ID: 54321", "", true},
 		{"invalid URL", "not-a-url", "", true},
 		{"non-item path", "https://dl.getchu.com/other", "", true},
 	}

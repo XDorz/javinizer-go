@@ -1,4 +1,6 @@
 {
+  "settings_dlgetchu_id_prefix_label": "输出 ID 前缀",
+  "settings_dlgetchu_id_prefix_desc": "默认 getchu-；留空使用纯数字。限 32 个英文字母、数字、下划线或连字符，且至少包含一个字母。不能使用完整编号（如 getchu-123 或 item12）作为前缀。重新获取元数据后生效，不修改已有缓存。",
   "$schema": "https://inlang.com/schema/inlang-message-format",
   "actresses_actress_created": "女优已创建",
   "actresses_actress_deleted": "女优已删除",

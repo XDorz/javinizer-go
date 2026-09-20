@@ -67,7 +67,7 @@ func TestCanHandleURLV3(t *testing.T) {
 		settings:    models.ScraperSettings{Enabled: true},
 	}
 
-	assert.True(t, scraper.CanHandleURL("https://dl.getchu.com/item/123456"))
+	assert.False(t, scraper.CanHandleURL("https://dl.getchu.com/item/123456"))
 	assert.False(t, scraper.CanHandleURL("https://example.com/work/RJ123456.html"))
 }
 

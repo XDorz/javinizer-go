@@ -22,7 +22,7 @@ func TestParseDetailPageFinal_FullPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to parse HTML: %v", err)
 	}
-	result := parseDetailPage(doc, htmlStr, "http://dl.getchu.com/i/item12345", "12345")
+	result := parseDetailPage(doc, htmlStr, "http://dl.getchu.com/i/item12345")
 	if result.ID != "12345" {
 		t.Errorf("expected ID 12345, got %s", result.ID)
 	}
@@ -45,9 +45,9 @@ func TestExtractNumericIDFinal(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"作品ID：12345", "12345"},
-		{"id=67890", "67890"},
-		{"/item1234", "1234"},
+		{"getchu-12345", "12345"},
+		{"GETCHU_67890", "67890"},
+		{"item1234", "1234"},
 		{"no id here", ""},
 	}
 	for _, tt := range tests {
@@ -87,12 +87,12 @@ func TestFindFirstDetailLinkFinal(t *testing.T) {
 		base  string
 		found bool
 	}{
-		{"https://dl.getchu.com/i/item12345", "http://dl.getchu.com", true},
-		{"/i/item12345", "http://dl.getchu.com", true},
+		{`<a href="https://dl.getchu.com/i/item12345">Product</a>`, "http://dl.getchu.com", true},
+		{`<a href="/i/item12345">Product</a>`, "http://dl.getchu.com", true},
 		{"no link here", "http://dl.getchu.com", false},
 	}
 	for _, tt := range tests {
-		got := findFirstDetailLink(tt.html, tt.base)
+		got := (&scraper{baseURL: tt.base}).findDetailLink(tt.html, "12345")
 		if (got != "") != tt.found {
 			t.Errorf("findFirstDetailLink() found=%v, want %v", got != "", tt.found)
 		}
@@ -105,7 +105,7 @@ func TestParseDetailPageFinal_EmptyPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to parse HTML: %v", err)
 	}
-	result := parseDetailPage(doc, htmlStr, "http://dl.getchu.com/i/item99999", "99999")
+	result := parseDetailPage(doc, htmlStr, "http://dl.getchu.com/i/item99999")
 	if result.ID != "99999" {
 		t.Errorf("expected fallback ID 99999, got %s", result.ID)
 	}
@@ -123,7 +123,7 @@ func TestParseDetailPageFinal_WithCover(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to parse HTML: %v", err)
 	}
-	result := parseDetailPage(doc, htmlStr, "http://dl.getchu.com/i/item12345", "12345")
+	result := parseDetailPage(doc, htmlStr, "http://dl.getchu.com/i/item12345")
 	if result.CoverURL == "" {
 		t.Error("expected cover URL")
 	}

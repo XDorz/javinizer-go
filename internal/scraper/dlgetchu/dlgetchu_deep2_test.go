@@ -22,7 +22,7 @@ func TestParseDetailPageDeep2_FullPage(t *testing.T) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	assert.NoError(t, err)
 
-	result := parseDetailPage(doc, html, "http://dl.getchu.com/i/item12345", "12345")
+	result := parseDetailPage(doc, html, "http://dl.getchu.com/i/item12345")
 	assert.Equal(t, "12345", result.ID)
 	assert.Equal(t, "Test Game Title", result.Title)
 	assert.Equal(t, 60, result.Runtime)
@@ -36,7 +36,7 @@ func TestParseDetailPageDeep2_EmptyPage(t *testing.T) {
 	html := `<html><body></body></html>`
 	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
 
-	result := parseDetailPage(doc, html, "http://dl.getchu.com/i/item99999", "99999")
+	result := parseDetailPage(doc, html, "http://dl.getchu.com/i/item99999")
 	assert.Equal(t, "99999", result.ID)
 	assert.Equal(t, "99999", result.Title)
 }
@@ -46,13 +46,13 @@ func TestExtractNumericIDDeep2(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"作品ID：12345", "12345"},
-		{"id=67890", "67890"},
-		{"/item12345", "12345"},
+		{"作品ID：12345", ""},
+		{"id=67890", ""},
+		{"/item12345", ""},
 		{"no id here", ""},
 		{"12345", "12345"},
 		{"1234abc", ""},
-		{"123", ""},
+		{"123", "123"},
 		{"", ""},
 	}
 	for _, tt := range tests {
@@ -68,9 +68,9 @@ func TestExtractIDFromURLDeep2(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
-		{"plain numeric ID", "12345", "12345", false},
+		{"plain numeric ID is not a URL", "12345", "", true},
 		{"partial numeric (no match)", "1234abc", "", true},
-		{"prefixed id=", "id=67890", "67890", false},
+		{"prefixed id=", "id=67890", "", true},
 		{"no match", "no id here", "", true},
 		{"item URL", "https://dl.getchu.com/i/item12345", "12345", false},
 		{"id query URL", "http://dl.getchu.com/item?id=67890", "67890", false},
@@ -133,19 +133,19 @@ func TestExtractScreenshotsDeep2_Empty(t *testing.T) {
 }
 
 func TestFindFirstDetailLinkDeep2_FullURL(t *testing.T) {
-	html := `https://dl.getchu.com/i/item12345`
-	link := findFirstDetailLink(html, "http://dl.getchu.com")
+	html := `<a href="https://dl.getchu.com/i/item12345">Product</a>`
+	link := (&scraper{baseURL: "http://dl.getchu.com"}).findDetailLink(html, "12345")
 	assert.Equal(t, "https://dl.getchu.com/i/item12345", link)
 }
 
 func TestFindFirstDetailLinkDeep2_PathOnly(t *testing.T) {
 	html := `<a href="/i/item12345">Link</a>`
-	link := findFirstDetailLink(html, "http://dl.getchu.com")
+	link := (&scraper{baseURL: "http://dl.getchu.com"}).findDetailLink(html, "12345")
 	assert.Equal(t, "http://dl.getchu.com/i/item12345", link)
 }
 
 func TestFindFirstDetailLinkDeep2_NoLink(t *testing.T) {
-	link := findFirstDetailLink("no link here", "http://dl.getchu.com")
+	link := (&scraper{baseURL: "http://dl.getchu.com"}).findDetailLink("no link here", "12345")
 	assert.Equal(t, "", link)
 }
 
@@ -176,6 +176,6 @@ func TestDescriptionRegexDeep2(t *testing.T) {
 func TestCanHandleURLDeep2(t *testing.T) {
 	s := &scraper{}
 	assert.True(t, s.CanHandleURL("https://dl.getchu.com/i/item12345"))
-	assert.True(t, s.CanHandleURL("http://www.getchu.com/test"))
+	assert.False(t, s.CanHandleURL("http://www.getchu.com/test"))
 	assert.False(t, s.CanHandleURL("https://example.com"))
 }

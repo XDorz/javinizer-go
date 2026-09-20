@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
+	"github.com/javinizer/javinizer-go/internal/matcher"
 	"github.com/javinizer/javinizer-go/internal/models"
 )
 
@@ -55,8 +56,9 @@ type APIConfig struct {
 	RequestTimeout time.Duration // cfg.Scrapers.RequestTimeoutSeconds converted to time.Duration
 
 	// Matching
-	RegexEnabled bool   // cfg.Matching.RegexEnabled
-	RegexPattern string // cfg.Matching.RegexPattern
+	RegexEnabled     bool   // cfg.Matching.RegexEnabled
+	RegexPattern     string // cfg.Matching.RegexPattern
+	DLGetchuIDPrefix string // cfg.Scrapers.ResolvedSettings("dlgetchu").IDPrefix
 
 	// System
 	TempDir             string // cfg.System.TempDir
@@ -125,8 +127,9 @@ type TempNarrowConfig struct {
 // MatcherNarrowConfig holds the fields consumed by the runtime manager
 // for constructing a matcher.MatcherInterface from the APIConfig snapshot.
 type MatcherNarrowConfig struct {
-	RegexEnabled bool
-	RegexPattern string
+	RegexEnabled     bool
+	RegexPattern     string
+	DLGetchuIDPrefix string
 }
 
 // SecurityConfig returns the narrow security config consumed by API-layer handlers.
@@ -188,8 +191,9 @@ func (c APIConfig) TempConfig() *TempNarrowConfig {
 // manager for constructing a matcher from the APIConfig snapshot.
 func (c APIConfig) MatcherConfig() *MatcherNarrowConfig {
 	return &MatcherNarrowConfig{
-		RegexEnabled: c.RegexEnabled,
-		RegexPattern: c.RegexPattern,
+		RegexEnabled:     c.RegexEnabled,
+		RegexPattern:     c.RegexPattern,
+		DLGetchuIDPrefix: c.DLGetchuIDPrefix,
 	}
 }
 
@@ -255,6 +259,7 @@ func ConfigFromAppConfig(cfg *config.Config) APIConfig {
 		RequestTimeout:      time.Duration(cfg.Scrapers.RequestTimeoutSeconds) * time.Second,
 		RegexEnabled:        cfg.Matching.RegexEnabled,
 		RegexPattern:        cfg.Matching.RegexPattern,
+		DLGetchuIDPrefix:    matcher.DLGetchuPrefixFromAppConfig(cfg),
 		TempDir:             cfg.System.TempDir,
 		VersionCheckEnabled: cfg.System.VersionCheckEnabled,
 		ImageCacheEnabled:   cfg.System.ImageCacheEnabled,

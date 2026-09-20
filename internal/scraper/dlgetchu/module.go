@@ -7,10 +7,16 @@ import (
 
 // Register registers the DLGetchu scraper with the given registrar.
 func Register(reg scraperutil.ScraperRegistrar) {
+	idPrefix := defaultIDPrefix
 	reg.Register(scraperutil.ScraperRegistration{
 		Name:        "dlgetchu",
 		Description: "DLGetchu",
 		Options: []models.ScraperOption{
+			{
+				Key: "id_prefix", Label: "Output ID prefix", Type: "string",
+				Description: "Prefix added to verified DLGetchu IDs; leave empty for numeric IDs. Existing cached metadata is unchanged.",
+				Default:     defaultIDPrefix,
+			},
 			{
 				Key:         "rate_limit",
 				Label:       "Rate Limit",
@@ -30,7 +36,8 @@ func Register(reg scraperutil.ScraperRegistrar) {
 		Defaults: models.ScraperSettings{
 			Enabled:   false,
 			RateLimit: 1000,
-			BaseURL:   "http://dl.getchu.com",
+			BaseURL:   defaultBaseURL,
+			IDPrefix:  &idPrefix,
 		},
 		Priority: 40,
 		Constructor: func(deps scraperutil.ScraperDeps) (models.Scraper, error) {
