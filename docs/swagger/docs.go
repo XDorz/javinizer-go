@@ -7613,6 +7613,9 @@ const docTemplate = `{
         "github_com_javinizer_javinizer-go_internal_config.webUIConfig": {
             "type": "object",
             "properties": {
+                "default_file_operation": {
+                    "type": "string"
+                },
                 "default_review_view": {
                     "type": "string"
                 },

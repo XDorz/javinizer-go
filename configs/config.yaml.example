@@ -524,3 +524,7 @@ webui:
     # Options: detail, grid-poster, grid-cover
     # Default: grid-poster
     default_review_view: grid-poster
+
+    # Initial file operation for each new Web UI review (temporary overrides stay per job)
+    # Options: move, copy, hardlink, softlink. Does not change CLI/TUI behavior.
+    default_file_operation: move

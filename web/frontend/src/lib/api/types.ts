@@ -1167,8 +1167,11 @@ export interface UIConfig {
 	language: string;
 }
 
+export type FileOperation = 'move' | 'copy' | 'hardlink' | 'softlink';
+
 export interface WebUIConfig {
 	default_review_view?: string;
+	default_file_operation?: FileOperation;
 	favorites?: FavoritesConfig;
 }
 

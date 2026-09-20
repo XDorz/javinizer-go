@@ -1,6 +1,6 @@
 <script lang="ts">
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
-	import type { SettingsConfig } from '$lib/api/types';
+	import type { FileOperation, SettingsConfig } from '$lib/api/types';
 	import * as m from '$lib/paraglide/messages';
 	import { SUPPORTED_LOCALES } from '$lib/i18n/locale';
 
@@ -19,6 +19,11 @@
 	function setSelectedView(value: string) {
 		if (!config.webui) config.webui = {};
 		config.webui.default_review_view = value;
+	}
+
+	function setFileOperation(value: FileOperation) {
+		if (!config.webui) config.webui = {};
+		config.webui.default_file_operation = value;
 	}
 
 	function getSelectedLanguage(): string {
@@ -56,6 +61,21 @@
 			<p class="text-xs text-muted-foreground mt-1">
 				{m.settings_default_review_view_desc()}
 			</p>
+		</div>
+		<div>
+			<label class="block text-sm font-medium mb-2" for="webui-default-file-operation">{m.settings_default_file_operation()}</label>
+			<select
+				id="webui-default-file-operation"
+				value={config.webui?.default_file_operation || 'move'}
+				onchange={(e) => setFileOperation((e.target as HTMLSelectElement).value as FileOperation)}
+				class={selectClass}
+			>
+				<option value="move">{m.review_op_move()}</option>
+				<option value="copy">{m.review_op_copy()}</option>
+				<option value="hardlink">{m.review_op_hardlink()}</option>
+				<option value="softlink">{m.review_op_softlink()}</option>
+			</select>
+			<p class="text-xs text-muted-foreground mt-1">{m.settings_default_file_operation_desc()}</p>
 		</div>
 		<div>
 			<label class="block text-sm font-medium mb-2" for="webui-language">{m.settings_language()}</label>

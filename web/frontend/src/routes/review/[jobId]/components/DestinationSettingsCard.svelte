@@ -5,7 +5,7 @@
 	import { FolderOpen } from 'lucide-svelte';
 	import * as m from '$lib/paraglide/messages';
 
-	type OrganizeOperation = 'move' | 'copy' | 'hardlink' | 'softlink';
+	import type { FileOperation as OrganizeOperation } from '$lib/api/types';
 
 	interface Props {
 		destinationPath: string;

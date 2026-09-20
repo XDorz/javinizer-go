@@ -2464,6 +2464,8 @@ definitions:
     type: object
   github_com_javinizer_javinizer-go_internal_config.webUIConfig:
     properties:
+      default_file_operation:
+        type: string
       default_review_view:
         type: string
       favorites:

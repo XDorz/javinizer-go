@@ -3,6 +3,7 @@ import { createOrganizeController } from './organize-controller';
 import type {
 	BatchJobResponse,
 	FileResult,
+	FileOperation,
 	Movie,
 	ProgressMessage,
 	UpdateRequest,
@@ -27,6 +28,7 @@ interface DepsOverrides {
 	jobId?: string;
 	job?: BatchJobResponse | null;
 	isUpdateMode?: boolean;
+	getOrganizeOperation?: () => FileOperation;
 	pollIntervalMs?: number;
 	pollTimeoutMs?: number;
 	completionDelayMs?: number;
@@ -81,7 +83,7 @@ function makeDeps(overrides: DepsOverrides = {}) {
 			currentJob = job;
 		},
 		getDestinationPath: () => '/out',
-		getOrganizeOperation: () => 'move' as const,
+		getOrganizeOperation: overrides.getOrganizeOperation ?? (() => 'move' as const),
 		getOperationMode: () => 'organize',
 		getEditedMovies: () => new Map<string, Movie>(),
 		saveAllEdits: () => Promise.resolve(),
@@ -552,5 +554,40 @@ describe('organize-controller handleWebSocketMessage progress gating (NEW-1)', (
 			]);
 			controller.cleanup();
 		});
+	});
+});
+
+
+describe('file operation requests', () => {
+	it.each([
+		['move', false, undefined],
+		['copy', true, undefined],
+		['hardlink', true, 'hard'],
+		['softlink', true, 'soft'],
+	] as const)('applies and retries %s without changing the operation', async (operation, copyOnly, linkMode) => {
+		let choice: FileOperation = operation;
+		const request = vi.fn().mockResolvedValue(undefined);
+		const { deps, fileStatuses } = makeDeps({
+			getOrganizeOperation: () => choice,
+			organizeBatchJob: request,
+		});
+		const controller = createOrganizeController(deps);
+		try {
+			await controller.organizeAll();
+			expect(request).toHaveBeenLastCalledWith('job-1', expect.objectContaining({
+				copy_only: copyOnly,
+				link_mode: linkMode,
+			}));
+			fileStatuses.set('/in/movie.mp4', { status: 'failed', error: 'disk error' });
+			choice = operation === 'move' ? 'copy' : 'move';
+			await controller.retryFailed();
+			expect(request).toHaveBeenLastCalledWith('job-1', expect.objectContaining({
+				copy_only: copyOnly,
+				link_mode: linkMode,
+				retry_file_paths: ['/in/movie.mp4'],
+			}));
+		} finally {
+			controller.cleanup();
+		}
 	});
 });

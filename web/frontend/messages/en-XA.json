@@ -1246,6 +1246,8 @@
   "settings_database_type_mysql": "[ MyŠQL ]",
   "settings_database_type_postgres": "[ PöstgrëŠQL ]",
   "settings_database_type_sqlite": "[ ŠQLítë ]",
+  "settings_default_file_operation": "[Ðéƒåûļţ Ƒîļé Öþéŕåţîöñ]",
+  "settings_default_file_operation_desc": "[Initial operation for new reviews. Changes apply only to that job; restored sessions keep their recorded operation.]",
   "settings_default_review_view": "[ Dëfåült Rëvíëw Víëw ]",
   "settings_default_review_view_desc": "[ Dëfåült víëw mödë whëñ öpëñíñg thë rëvíëw pågë. Üsërs çåñ stíll swítçh víëws åt rüñtímë. ]",
   "settings_file_matching_desc": "[ Çöñfígürë fílë sçåññíñg, ëxtëñsíöñs, åñd ÍD ëxtråçtíöñ påttërñs ]",

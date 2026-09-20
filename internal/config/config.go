@@ -105,8 +105,9 @@ func ValidateScraperBaseURL(path, raw string, allowedHosts []string) error {
 }
 
 type webUIConfig struct {
-	DefaultReviewView string          `yaml:"default_review_view" json:"default_review_view"`
-	Favorites         FavoritesConfig `yaml:"favorites" json:"favorites"`
+	DefaultReviewView    string          `yaml:"default_review_view" json:"default_review_view"`
+	DefaultFileOperation string          `yaml:"default_file_operation" json:"default_file_operation"`
+	Favorites            FavoritesConfig `yaml:"favorites" json:"favorites"`
 }
 
 // FavoritesConfig holds user-curated quick-apply lists surfaced in the web UI.
@@ -486,6 +487,10 @@ func ValidateConfig(cfg *Config) error {
 		default:
 			return fmt.Errorf("webui.default_review_view must be one of: detail, grid-poster, grid-cover")
 		}
+	}
+
+	if err := validateDefaultFileOperation(cfg.WebUI.DefaultFileOperation); err != nil {
+		return err
 	}
 
 	// ui.language: "auto" or a syntactically valid BCP 47 tag. An unsupported

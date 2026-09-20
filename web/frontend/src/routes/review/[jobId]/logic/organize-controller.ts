@@ -1,5 +1,6 @@
 import type {
 	BatchJobResponse,
+	FileOperation,
 	Movie,
 	OperationMode,
 	ProgressMessage,
@@ -7,7 +8,9 @@ import type {
 	ReviewApplyOverrides,
 } from '$lib/api/types';
 
-export type OrganizeOperation = 'move' | 'copy' | 'hardlink' | 'softlink';
+import { fileOperationOptions } from '$lib/file-operation';
+
+export type OrganizeOperation = FileOperation;
 export type OrganizeStatus = 'idle' | 'organizing' | 'completed' | 'failed';
 
 export interface ApplyRecoveryState {
@@ -86,16 +89,6 @@ function isDefinitiveApplyLaunchRejection(error: unknown): boolean {
 	if (!('status' in error)) return false;
 	const status = error.status;
 	return status === 400 || status === 403 || status === 404 || status === 409;
-}
-
-function getOrganizeRequestOptions(operation: OrganizeOperation): {
-	copyOnly: boolean;
-	linkMode?: 'hard' | 'soft';
-} {
-	return {
-		copyOnly: operation !== 'move',
-		linkMode: operation === 'hardlink' ? 'hard' : operation === 'softlink' ? 'soft' : undefined,
-	};
 }
 
 function getOrganizeEligibleFilePaths(batchJob: BatchJobResponse | null): string[] {
@@ -363,10 +356,10 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		skipDownload?: boolean,
 		overrides?: ReviewApplyOverrides,
 		retryPaths: string[] = [],
+		operation: OrganizeOperation = deps.getOrganizeOperation(),
 	) {
 		const operationJobId = deps.getJobId();
 		const operationGeneration = deps.getRouteGeneration?.() ?? 0;
-		const operation = deps.getOrganizeOperation();
 		const effectiveMode = deps.getOperationMode();
 		const operationDestination = deps.getDestinationPath();
 		const needsDestination = effectiveMode === 'organize';
@@ -382,7 +375,6 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		lastOrganizeOperation = operation;
 		lastRecoveryFailedPaths = Array.from(new Set(retryPaths));
 
-		const { copyOnly, linkMode } = getOrganizeRequestOptions(operation);
 		const preApplyGeneration = deps.getJob()?.apply_generation;
 		prepareOrganizeRun(retryPaths);
 		const operationToken = organizeRunToken;
@@ -401,8 +393,7 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 			requestPending = true;
 			const request = deps.api.organizeBatchJob(operationJobId, {
 				destination: operationDestination,
-				copy_only: copyOnly,
-				link_mode: linkMode,
+				...fileOperationOptions(operation),
 				operation_mode: effectiveMode as OperationMode,
 				skip_nfo: skipNfo || false,
 				skip_download: skipDownload || false,
@@ -504,7 +495,13 @@ export function createOrganizeController(deps: OrganizeControllerDeps) {
 		if (deps.getIsUpdateMode()) {
 			await updateAll(lastUpdateOptions, allRetryPaths);
 		} else {
-			await organizeAll(lastSkipNfo, lastSkipDownload, lastOrganizeOverrides, allRetryPaths);
+			await organizeAll(
+				lastSkipNfo,
+				lastSkipDownload,
+				lastOrganizeOverrides,
+				allRetryPaths,
+				lastOrganizeOperation,
+			);
 		}
 	}
 

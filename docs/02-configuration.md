@@ -1417,6 +1417,22 @@ system:
   image_cache_max_size_mb: 512
 ```
 
+### Web UI Defaults
+
+```yaml
+webui:
+  default_review_view: grid-poster
+  default_file_operation: move
+```
+
+`default_file_operation` accepts `move`, `copy`, `hardlink`, or `softlink`. Set it in
+**Settings → Web UI** to choose the initial file operation for new review jobs.
+Changing the operation on a review page applies only to that job. Restored apply
+sessions keep their recorded operation; refreshing configuration does not change
+an open review's selection. CLI and TUI file operations are unaffected. Hard links
+require source and destination to share a filesystem; failure does not fall back
+to copying or moving.
+
 ### NFO Defaults
 
 ```yaml
