@@ -354,8 +354,9 @@ func DefaultConfig(priorities []string, defaults map[string]*models.ScraperSetti
 		// lack the field inherit false via decodeConfig's load-into-DefaultConfig,
 		// so no migration is required.
 		WebUI: webUIConfig{
-			DefaultReviewView: "grid-poster",
-			Favorites:         FavoritesConfig{Genre: []string{}},
+			DefaultReviewView:    "grid-poster",
+			DefaultFileOperation: "move",
+			Favorites:            FavoritesConfig{Genre: []string{}},
 		},
 	}
 }

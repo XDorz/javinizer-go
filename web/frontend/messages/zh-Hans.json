@@ -1911,6 +1911,8 @@
   "settings_database_type_mysql": "MySQL",
   "settings_database_type_postgres": "PostgreSQL",
   "settings_database_type_sqlite": "SQLite",
+  "settings_default_file_operation": "默认文件操作",
+  "settings_default_file_operation_desc": "新审查任务的初始文件操作。审查页中的选择仅对当前任务生效；恢复的任务保留原有操作。",
   "settings_default_review_view": "默认审查视图",
   "settings_default_review_view_desc": "打开审查页面时的默认视图模式。用户仍可在运行时切换视图。",
   "settings_file_matching_desc": "配置文件扫描、扩展名和 ID 提取模式",

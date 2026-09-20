@@ -11,6 +11,8 @@ import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 import { apiClient } from '$lib/api/client';
 import { ApiError, BaseClient } from '$lib/api/clients/common';
 import { translateErrorCode } from '$lib/i18n/api-messages';
+import { fileOperationOptions } from '$lib/file-operation';
+import { createFileOperationSelection } from './file-operation.svelte';
 import { createConfigQuery } from '$lib/query/queries';
 import type {
 	BatchJobResponse,
@@ -352,7 +354,15 @@ export function createReviewState(getJobId: () => string) {
 	let selectionMode = $state(false);
 	let organizing = $state(false);
 	let destinationPath = $state('');
-	let organizeOperation = $state<OrganizeOperation>('move');
+	const fileOperationSelection = createFileOperationSelection(
+		() => jobId,
+		() => (config ? (config.webui?.default_file_operation || 'move') : undefined),
+		() => {
+			const recovery = readApplyRecovery(jobId);
+			return recovery?.operation === 'organize' ? recovery.organizeOperation : undefined;
+		},
+	);
+	let organizeOperation = $derived(fileOperationSelection.value);
 	let showDestinationBrowser = $state(false);
 	let tempDestinationPath = $state('');
 	let showTrailerModal = $state(false);
@@ -625,7 +635,7 @@ export function createReviewState(getJobId: () => string) {
 	const canPreviewOutput = $derived(canOrganize || !!job?.apply_plan);
 
 	let previewEnabled = $derived.by(() => {
-		if (!currentMovie) return false;
+		if (!currentMovie || !config || !fileOperationSelection.initialized) return false;
 		if (organizeStatus === 'organizing') return false;
 		const operationMode = getEffectiveOperationMode();
 		const needsDestination = operationMode === 'organize';
@@ -640,6 +650,7 @@ export function createReviewState(getJobId: () => string) {
 		// config/override mode change with the other key parts unchanged would
 		// reuse a stale preview. queryFn captures the same value as the key.
 		const operationMode = getEffectiveOperationMode();
+		const fileOperation = organizeOperation;
 		return {
 			queryKey: [
 				'organize-preview',
@@ -648,7 +659,7 @@ export function createReviewState(getJobId: () => string) {
 				currentMovie?.id,
 				operationMode,
 				destinationPath,
-				organizeOperation,
+				fileOperation,
 				skipNfo,
 				skipDownload,
 				overwriteExistingMedia,
@@ -660,14 +671,6 @@ export function createReviewState(getJobId: () => string) {
 				editedMovieKey,
 			],
 			queryFn: () => {
-				const copyOnly = organizeOperation !== 'move';
-				const linkMode =
-					organizeOperation === 'hardlink'
-						? 'hard'
-						: organizeOperation === 'softlink'
-							? 'soft'
-							: undefined;
-
 				const fp = currentResult?.file_path ?? '';
 				const isEdited = editedMovies.has(fp);
 				let movieOverride: Movie | undefined;
@@ -677,8 +680,7 @@ export function createReviewState(getJobId: () => string) {
 
 				return apiClient.previewOrganize(jobId, currentResult!.result_id, {
 					destination: destinationPath,
-					copy_only: copyOnly,
-					link_mode: linkMode,
+					...fileOperationOptions(fileOperation),
 					operation_mode: operationMode as
 						| 'organize'
 						| 'in-place'
@@ -1480,6 +1482,7 @@ export function createReviewState(getJobId: () => string) {
 		skipDownloadArg = skipDownload,
 		overridesArg = buildReviewOverrides(),
 		retryPaths: string[] = [],
+		operation: OrganizeOperation = organizeOperation,
 	) {
 		const targetJobId = jobId;
 		writeApplyRecovery({
@@ -1489,14 +1492,14 @@ export function createReviewState(getJobId: () => string) {
 			destination: destinationPath,
 			skipNfo: skipNfoArg,
 			skipDownload: skipDownloadArg,
-			organizeOperation,
+			organizeOperation: operation,
 			overrides: overridesArg,
 			failed: {},
 			succeeded: [],
 			eligibleFilePaths: Array.from(new Set([...getApplyEligibleFilePaths(job), ...retryPaths])),
 		});
 		await runForJob(targetJobId, () =>
-			organizeController.organizeAll(skipNfoArg, skipDownloadArg, overridesArg, retryPaths),
+			organizeController.organizeAll(skipNfoArg, skipDownloadArg, overridesArg, retryPaths, operation),
 		);
 	}
 
@@ -1535,7 +1538,13 @@ export function createReviewState(getJobId: () => string) {
 			return;
 		}
 		if (recovery?.operation === 'organize') {
-			await organizeAll(recovery.skipNfo, recovery.skipDownload, recovery.overrides, paths);
+			await organizeAll(
+				recovery.skipNfo,
+				recovery.skipDownload,
+				recovery.overrides,
+				paths,
+				recovery.organizeOperation,
+			);
 			return;
 		}
 		await runForJob(targetJobId, () => organizeController.retryFailed());
@@ -1579,7 +1588,6 @@ export function createReviewState(getJobId: () => string) {
 			completenessFilter.add('partial');
 			completenessFilter.add('complete');
 			organizing = false;
-			organizeOperation = 'move';
 			organizeProgress = 0;
 			organizeStatus = 'idle';
 			fileStatuses.clear();
@@ -1648,7 +1656,6 @@ export function createReviewState(getJobId: () => string) {
 		const recovery = readApplyRecovery(loadedJob.id);
 		if (!recovery) return;
 		if (recovery.operation === 'organize') {
-			organizeOperation = recovery.organizeOperation;
 			if (recovery.destination) destinationPath = recovery.destination;
 		}
 		const hasRecordedApplyOutcome =
@@ -1961,7 +1968,7 @@ export function createReviewState(getJobId: () => string) {
 			return organizeOperation;
 		},
 		set organizeOperation(v) {
-			organizeOperation = v;
+			fileOperationSelection.select(v);
 		},
 		get showDestinationBrowser() {
 			return showDestinationBrowser;

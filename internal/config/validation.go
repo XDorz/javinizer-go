@@ -27,6 +27,16 @@ func validateUILanguage(lang string) error {
 	return nil
 }
 
+// Empty preserves compatibility with configurations created before this Web UI preference.
+func validateDefaultFileOperation(operation string) error {
+	switch operation {
+	case "", "move", "copy", "hardlink", "softlink":
+		return nil
+	default:
+		return fmt.Errorf("webui.default_file_operation must be one of: move, copy, hardlink, softlink")
+	}
+}
+
 // ConfigWarning represents a non-blocking validation warning about a
 // potentially misconfigured setting. Warnings are surfaced via the API
 // and WebUI but do not block config loading or scraping.
@@ -414,6 +424,10 @@ func validateConfigExcludingTranslationCredentials(cfg *Config) error {
 		default:
 			return fmt.Errorf("webui.default_review_view must be one of: detail, grid-poster, grid-cover")
 		}
+	}
+
+	if err := validateDefaultFileOperation(cfg.WebUI.DefaultFileOperation); err != nil {
+		return err
 	}
 
 	if err := validateUILanguage(cfg.UI.Language); err != nil {

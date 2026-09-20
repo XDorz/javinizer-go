@@ -1911,6 +1911,8 @@
   "settings_database_type_mysql": "MySQL",
   "settings_database_type_postgres": "PostgreSQL",
   "settings_database_type_sqlite": "SQLite",
+  "settings_default_file_operation": "預設檔案操作",
+  "settings_default_file_operation_desc": "新審查任務的初始檔案操作。審查頁中的選擇僅對目前任務生效；恢復的任務保留原有操作。",
   "settings_default_review_view": "預設檢閱檢視",
   "settings_default_review_view_desc": "開啟檢閱頁面時的預設檢視模式。使用者仍可在執行時切換檢視。",
   "settings_file_matching_desc": "設定檔案掃描、副檔名與 ID 擷取模式",

@@ -1911,6 +1911,8 @@
   "settings_database_type_mysql": "MySQL",
   "settings_database_type_postgres": "PostgreSQL",
   "settings_database_type_sqlite": "SQLite",
+  "settings_default_file_operation": "既定のファイル操作",
+  "settings_default_file_operation_desc": "新しいレビューで最初に選択する操作です。レビューページでの変更はそのジョブにのみ適用され、復元したジョブは記録済みの操作を維持します。",
   "settings_default_review_view": "デフォルトのレビュー表示",
   "settings_default_review_view_desc": "レビューページを開いた際のデフォルトの表示モード。実行時に切り替えることもできます。",
   "settings_file_matching_desc": "ファイルスキャン、拡張子、ID 抽出パターンを設定",
